@@ -6,7 +6,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.7)
+## Cosa fa (versione 0.8)
 
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
@@ -16,6 +16,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 - Trascrive sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
 - Crea elaborazioni con 9 modelli pronti: Sintesi veloce, Riunione, Lezione o corso, Intervista, Colloquio o consulenza, Telefonata, Idee e brainstorming, Verbale formale, Appunto vocale. Puoi aggiungere i tuoi.
 - Trascrive in italiano, inglese, francese, tedesco, spagnolo e portoghese (lingua da scegliere in Impostazioni).
+- Separa i parlanti sul telefono (Persona 1, Persona 2…), con nomi modificabili e profili vocali per riconoscere le persone nelle registrazioni successive.
 - Glossario con correzioni automatiche e revisione della trascrizione con Claude.
 - **Claude dentro l'app** (con chiave API, in Impostazioni ⚙︎): elaborazione con Claude e "Chiedi a Claude" sulla registrazione (domande, mail, comunicati). A Claude va solo il testo.
 - **Modelli personalizzati**: crea, modifica o duplica i modelli di elaborazione (Impostazioni > Modelli di elaborazione).
@@ -60,5 +61,5 @@ Quando Claude modifica il codice, GitHub ricompila da solo. Scarichi il nuovo .i
 Gli audio sono in **File > Sul mio iPhone > Registratore AI > Registrazioni**.
 
 ## Prossime versioni
-- **v2:** etichette per chi parla, widget e Live Activity, note e foto durante la registrazione, note e foto.
+- **v2:** widget e Live Activity, note e foto durante la registrazione, note e foto.
 - **v3:** ricerca in tutto l'archivio, mappa mentale, copia su iCloud Drive.
