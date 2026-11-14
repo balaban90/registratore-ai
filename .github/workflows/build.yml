@@ -46,7 +46,8 @@ jobs:
           grep -E "error:" xcodebuild.log | sort -u | head -40 | while IFS= read -r line; do
             echo "::error::${line//$'\n'/ }"
           done
-          test -d build/dd/Build/Products/Release-iphoneos/RegistratoreAI.app
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+          test -f build/dd/Build/Products/Release-iphoneos/RegistratoreAI.app/RegistratoreAI
 
       - name: Crea il file .ipa
         run: |

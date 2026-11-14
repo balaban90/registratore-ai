@@ -84,7 +84,18 @@ enum DiarizationService {
             samples = all
         }
         guard samples.count >= Int(3 * sampleRate) else { throw DiarizationFailure.tooShort }
-        return try diarizer.extractEmbedding(samples)
+        // L'impronta è quella della voce che parla di più nel campione.
+        let result = try diarizer.performCompleteDiarization(samples)
+        var durations: [String: Double] = [:]
+        for segment in result.segments {
+            let id = String(describing: segment.speakerId)
+            durations[id, default: 0] += Double(segment.endTimeSeconds) - Double(segment.startTimeSeconds)
+        }
+        guard let main = durations.max(by: { $0.value < $1.value })?.key,
+              let speaker = diarizer.speakerManager.getSpeaker(for: main) else {
+            throw DiarizationFailure.tooShort
+        }
+        return speaker.currentEmbedding
     }
 
     /// Assegna a ogni frase il parlante che la copre di più.
