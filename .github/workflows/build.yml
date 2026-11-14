@@ -43,9 +43,12 @@ jobs:
             build > xcodebuild.log 2>&1 || true
           grep -E "BUILD (SUCCEEDED|FAILED)" xcodebuild.log || true
           # Errori come annotazioni (leggibili anche senza accesso ai log)
-          grep -E "error:" xcodebuild.log | sort -u | head -40 | while IFS= read -r line; do
-            echo "::error::${line//$'\n'/ }"
+          { grep -E "error:|failed" xcodebuild.log || true; } | sort -u | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
           done
+          if ! grep -q "BUILD SUCCEEDED" xcodebuild.log; then
+            tail -25 xcodebuild.log | while IFS= read -r line; do echo "::warning::${line}"; done
+          fi
           grep -q "BUILD SUCCEEDED" xcodebuild.log
           test -f build/dd/Build/Products/Release-iphoneos/RegistratoreAI.app/RegistratoreAI
 
