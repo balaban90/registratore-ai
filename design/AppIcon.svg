@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF6B4A"/>
+      <stop offset="1" stop-color="#C2185B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+  <!-- onde sonore -->
+  <g fill="#ffffff">
+    <rect x="212" y="340" width="40" height="170" rx="20" opacity="0.85"/>
+    <rect x="132" y="380" width="40" height="90" rx="20" opacity="0.55"/>
+    <rect x="772" y="340" width="40" height="170" rx="20" opacity="0.85"/>
+    <rect x="852" y="380" width="40" height="90" rx="20" opacity="0.55"/>
+  </g>
+  <!-- microfono -->
+  <rect x="417" y="200" width="190" height="330" rx="95" fill="#ffffff"/>
+  <g stroke="#E2384F" stroke-width="14" stroke-linecap="round" opacity="0.35">
+    <line x1="462" y1="300" x2="562" y2="300"/>
+    <line x1="462" y1="350" x2="562" y2="350"/>
+    <line x1="462" y1="400" x2="562" y2="400"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="38" stroke-linecap="round">
+    <path d="M 327 440 A 185 185 0 0 0 697 440"/>
+    <line x1="512" y1="628" x2="512" y2="742"/>
+    <line x1="417" y1="770" x2="607" y2="770"/>
+  </g>
+  <!-- scintilla AI -->
+  <path d="M 742 168 C 752 214 766 228 812 238 C 766 248 752 262 742 308 C 732 262 718 248 672 238 C 718 228 732 214 742 168 Z" fill="#FFE9A8"/>
+  <path d="M 838 286 C 843 308 850 315 872 320 C 850 325 843 332 838 354 C 833 332 826 325 804 320 C 826 315 833 308 838 286 Z" fill="#FFE9A8" opacity="0.85"/>
+</svg>
