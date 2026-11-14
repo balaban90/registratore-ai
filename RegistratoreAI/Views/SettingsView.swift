@@ -97,6 +97,11 @@ struct SettingsView: View {
                     } label: {
                         Label("Glossario", systemImage: "character.book.closed")
                     }
+                    NavigationLink {
+                        VoiceProfilesView()
+                    } label: {
+                        Label("Voci e parlanti", systemImage: "person.2.wave.2")
+                    }
                 }
 
                 Section("Informazioni") {

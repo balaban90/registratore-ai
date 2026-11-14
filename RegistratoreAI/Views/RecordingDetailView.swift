@@ -6,6 +6,12 @@ struct ShareItem: Identifiable {
     let items: [Any]
 }
 
+struct SpeakerEditTarget: Identifiable {
+    let speakerId: String
+    let segmentId: UUID?
+    var id: String { speakerId + (segmentId?.uuidString ?? "") }
+}
+
 enum DetailTab: String, CaseIterable, Identifiable {
     case summaries = "Elaborazioni"
     case transcript = "Trascrizione"
@@ -19,6 +25,9 @@ struct RecordingDetailView: View {
     @StateObject private var player = AudioPlayer()
     @Query(sort: \CustomTemplate.createdAt) private var customTemplates: [CustomTemplate]
     @Query(sort: \GlossaryEntry.createdAt) private var glossary: [GlossaryEntry]
+    @Query private var voiceProfiles: [VoiceProfile]
+    @State private var isDiarizing = false
+    @State private var editingSpeaker: SpeakerEditTarget?
 
     @State private var tab: DetailTab = .summaries
     @State private var isTranscribing = false
@@ -38,7 +47,7 @@ struct RecordingDetailView: View {
         SummaryTemplate.available(custom: customTemplates)
     }
 
-    private var busy: Bool { isTranscribing || isSummarizing || isRevising }
+    private var busy: Bool { isTranscribing || isSummarizing || isRevising || isDiarizing }
 
     private var shownSegments: [TranscriptSegment] {
         showOriginal && recording.revisedByClaude ? recording.originalSegments : recording.segments
@@ -105,6 +114,9 @@ struct RecordingDetailView: View {
         }
         .sheet(isPresented: $showAsk) {
             AskClaudeView(recording: recording)
+        }
+        .sheet(item: $editingSpeaker) { target in
+            SpeakerEditSheet(recording: recording, speakerId: target.speakerId, segmentId: target.segmentId)
         }
         .onAppear {
             claudeReady = ClaudeService.isConfigured
@@ -235,11 +247,13 @@ struct RecordingDetailView: View {
 
             ForEach(recording.sortedSummaries) { summary in
                 SummaryCard(summary: summary, recordingTitle: recording.title,
+                            isStale: isStale(summary),
                             onShare: { items in shareItem = ShareItem(items: items) },
                             onDelete: {
                                 context.delete(summary)
                                 try? context.save()
-                            })
+                            },
+                            onRegenerate: canRegenerate(summary) ? { regenerate(summary) } : nil)
             }
         }
     }
@@ -329,9 +343,37 @@ struct RecordingDetailView: View {
                 }
             }
 
+            if recording.diarized {
+                speakerChips
+            }
+
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(shownSegments) { segment in
+                ForEach(Array(shownSegments.enumerated()), id: \.element.id) { item in
+                    let index = item.offset
+                    let segment = item.element
                     let isCurrent = segment.id == currentSegmentID
+                    let newTurn = recording.diarized && segment.speaker != nil
+                        && (index == 0 || shownSegments[index - 1].speaker != segment.speaker)
+                    if newTurn, let speaker = segment.speaker {
+                        Button {
+                            editingSpeaker = SpeakerEditTarget(speakerId: speaker, segmentId: segment.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(SpeakerColors.color(for: speaker, in: recording.speakerOrder))
+                                    .frame(width: 8, height: 8)
+                                Text(recording.speakerName(speaker))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(SpeakerColors.color(for: speaker, in: recording.speakerOrder))
+                                Image(systemName: "pencil").font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.top, index == 0 ? 4 : 12)
+                            .padding(.bottom, 2)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Rinomina chi parla")
+                    }
                     Button {
                         player.seek(to: segment.start)
                     } label: {
@@ -352,6 +394,25 @@ struct RecordingDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .id(segment.id)
+                    .contextMenu {
+                        if recording.diarized {
+                            Menu("Attribuisci a…") {
+                                ForEach(recording.speakerOrder, id: \.self) { speaker in
+                                    Button(recording.speakerName(speaker)) {
+                                        reassign(segment.id, to: speaker)
+                                    }
+                                }
+                                Button("Nuova persona") {
+                                    reassign(segment.id, to: "manual-\(UUID().uuidString.prefix(8))")
+                                }
+                            }
+                        }
+                        Button {
+                            UIPasteboard.general.string = segment.text
+                        } label: {
+                            Label("Copia la frase", systemImage: "doc.on.doc")
+                        }
+                    }
                 }
             }
             .padding(8)
@@ -359,8 +420,38 @@ struct RecordingDetailView: View {
         }
     }
 
+    private var speakerChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(recording.speakerOrder, id: \.self) { speaker in
+                    let count = recording.segments.filter { $0.speaker == speaker }.count
+                    Button {
+                        editingSpeaker = SpeakerEditTarget(speakerId: speaker, segmentId: nil)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(SpeakerColors.color(for: speaker, in: recording.speakerOrder))
+                                .frame(width: 8, height: 8)
+                            Text(recording.speakerName(speaker)).font(.footnote.weight(.semibold))
+                            Text("\(count)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private var transcriptMenu: some View {
         Menu {
+            Button {
+                separateSpeakers()
+            } label: {
+                Label(recording.diarized ? "Separa di nuovo i parlanti" : "Separa i parlanti", systemImage: "person.2.wave.2")
+            }
             if claudeReady {
                 Button {
                     reviseWithClaude()
@@ -473,18 +564,93 @@ struct RecordingDetailView: View {
                 recording.revisedByClaude = false
                 showOriginal = false
                 revisionCost = nil
+                recording.diarized = false
+                recording.speakerNames = [:]
                 recording.transcript = recording.plainTranscript
                 recording.transcriptionError = nil
                 try? context.save()
+                isTranscribing = false
+                if DiarizationService.isEnabled {
+                    separateSpeakers()
+                }
             } catch {
                 recording.transcriptionError = error.localizedDescription
                 errorText = "Trascrizione non riuscita: \(error.localizedDescription)"
+                isTranscribing = false
             }
-            isTranscribing = false
         }
     }
 
-    private func summarize(with template: SummaryTemplate) {
+    private func separateSpeakers() {
+        guard !isDiarizing, !recording.segments.isEmpty else { return }
+        isDiarizing = true
+        errorText = nil
+        progressText = "Separo le voci…"
+        let url = recording.audioURL
+        let known = voiceProfiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
+        let profileNames = Dictionary(uniqueKeysWithValues: voiceProfiles.map { ($0.speakerKey, $0.name) })
+        Task {
+            do {
+                let turns = try await DiarizationService.diarize(url: url, known: known) { message in
+                    progressText = message
+                }
+                recording.segments = DiarizationService.assign(turns, to: recording.segments)
+                if recording.revisedByClaude {
+                    recording.originalSegments = DiarizationService.assign(turns, to: recording.originalSegments)
+                }
+                // I parlanti riconosciuti dai profili vocali prendono subito il nome.
+                var names: [String: String] = [:]
+                for id in recording.speakerOrder {
+                    if let n = profileNames[id] { names[id] = n }
+                }
+                recording.speakerNames = names
+                recording.diarized = true
+                recording.speakerNamesUpdatedAt = .now
+                recording.transcript = recording.plainTranscript
+                try? context.save()
+            } catch {
+                errorText = "Separazione delle voci non riuscita: \(error.localizedDescription)"
+            }
+            isDiarizing = false
+        }
+    }
+
+    private func reassign(_ segmentId: UUID, to speaker: String) {
+        recording.segments = recording.segments.map { seg in
+            var s = seg
+            if s.id == segmentId { s.speaker = speaker }
+            return s
+        }
+        recording.speakerNamesUpdatedAt = .now
+        recording.transcript = recording.plainTranscript
+        try? context.save()
+    }
+
+    // MARK: - Elaborazioni da aggiornare
+
+    private func isStale(_ summary: Summary) -> Bool {
+        guard recording.diarized, let changed = recording.speakerNamesUpdatedAt else { return false }
+        return summary.templateID != "domanda" && changed > summary.createdAt
+    }
+
+    private func templateFor(_ summary: Summary) -> SummaryTemplate? {
+        templates.first { $0.id == summary.templateID }
+    }
+
+    private func canRegenerate(_ summary: Summary) -> Bool {
+        templateFor(summary) != nil
+    }
+
+    private func regenerate(_ summary: Summary) {
+        guard let template = templateFor(summary) else { return }
+        if summary.displayName.hasSuffix("· AI") && claudeReady {
+            summarizeWithClaude(template, replacing: summary)
+        } else {
+            summarize(with: template, replacing: summary)
+        }
+    }
+
+    private func summarize(with template: SummaryTemplate, replacing old: Summary? = nil) {
         guard let transcript = recording.transcript, !isSummarizing else { return }
         isSummarizing = true
         errorText = nil
@@ -497,6 +663,7 @@ struct RecordingDetailView: View {
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
                 summary.recording = recording
                 context.insert(summary)
+                if let old { context.delete(old) }
                 try? context.save()
             } catch {
                 errorText = error.localizedDescription
@@ -554,7 +721,7 @@ struct RecordingDetailView: View {
         }
     }
 
-    private func summarizeWithClaude(_ template: SummaryTemplate) {
+    private func summarizeWithClaude(_ template: SummaryTemplate, replacing old: Summary? = nil) {
         guard recording.transcript != nil, !isSummarizing else { return }
         isSummarizing = true
         errorText = nil
@@ -567,6 +734,7 @@ struct RecordingDetailView: View {
                 let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
                 summary.recording = recording
                 context.insert(summary)
+                if let old { context.delete(old) }
                 try? context.save()
             } catch {
                 errorText = error.localizedDescription
@@ -602,8 +770,10 @@ struct CompactLabelStyle: LabelStyle {
 struct SummaryCard: View {
     let summary: Summary
     let recordingTitle: String
+    var isStale: Bool = false
     let onShare: ([Any]) -> Void
     let onDelete: () -> Void
+    var onRegenerate: (() -> Void)? = nil
 
     var body: some View {
         let tile = Theme.tile(for: summary.templateID)
@@ -638,6 +808,23 @@ struct SummaryCard: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Azioni sull'elaborazione")
+            }
+            if isStale {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.2.badge.gearshape")
+                        .foregroundStyle(Theme.accentText)
+                    Text("I nomi dei parlanti sono cambiati dopo questa elaborazione.")
+                        .font(.footnote)
+                    Spacer(minLength: 4)
+                    if let onRegenerate {
+                        Button("Rigenera", action: onRegenerate)
+                            .font(.footnote.weight(.semibold))
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+                .padding(10)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             MarkdownText(text: summary.text)
         }
