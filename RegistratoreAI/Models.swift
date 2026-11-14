@@ -6,6 +6,31 @@ struct TranscriptSegment: Codable, Hashable, Identifiable {
     var start: Double
     var end: Double
     var text: String
+    /// Identificativo del parlante (nil se le voci non sono state separate).
+    var speaker: String?
+}
+
+/// Profilo vocale salvato: permette di riconoscere una persona nelle nuove registrazioni.
+@Model
+final class VoiceProfile {
+    var id: UUID = UUID()
+    var name: String = ""
+    var isMe: Bool = false
+    var embeddingData: Data = Data()
+    var createdAt: Date = Date.now
+
+    init(name: String, isMe: Bool, embedding: [Float]) {
+        self.name = name
+        self.isMe = isMe
+        self.embeddingData = (try? JSONEncoder().encode(embedding)) ?? Data()
+    }
+
+    var embedding: [Float] {
+        (try? JSONDecoder().decode([Float].self, from: embeddingData)) ?? []
+    }
+
+    /// Id usato dal riconoscitore: così il parlante riconosciuto porta questo id.
+    var speakerKey: String { "profile-\(id.uuidString)" }
 }
 
 @Model
@@ -24,6 +49,10 @@ final class Recording {
     /// Trascrizione automatica originale, conservata quando Claude la rivede.
     var originalSegmentsData: Data?
     var revisedByClaude: Bool = false
+    /// Voci separate e nomi assegnati (id parlante → nome).
+    var diarized: Bool = false
+    var speakerNamesData: Data?
+    var speakerNamesUpdatedAt: Date?
     @Relationship(deleteRule: .cascade, inverse: \Summary.recording)
     var summaries: [Summary] = []
 
@@ -58,14 +87,58 @@ final class Recording {
         }
     }
 
-    /// Testo semplice, senza orari: è quello che passa all'AI (risparmia spazio).
+    var speakerNames: [String: String] {
+        get {
+            guard let speakerNamesData else { return [:] }
+            return (try? JSONDecoder().decode([String: String].self, from: speakerNamesData)) ?? [:]
+        }
+        set {
+            speakerNamesData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    /// Parlanti nell'ordine in cui intervengono per la prima volta.
+    var speakerOrder: [String] {
+        var seen: [String] = []
+        for s in segments {
+            if let id = s.speaker, !seen.contains(id) { seen.append(id) }
+        }
+        return seen
+    }
+
+    /// Nome da mostrare: quello assegnato, altrimenti "Persona N".
+    func speakerName(_ id: String?) -> String {
+        guard let id else { return "" }
+        if let name = speakerNames[id], !name.isEmpty { return name }
+        if let index = speakerOrder.firstIndex(of: id) { return "Persona \(index + 1)" }
+        return "Persona"
+    }
+
+    /// Testo per l'AI: una riga per turno di parola, con il nome se le voci sono separate.
     var plainTranscript: String {
-        segments.map(\.text).joined(separator: "\n")
+        guard diarized else { return segments.map(\.text).joined(separator: "\n") }
+        var lines: [String] = []
+        var currentSpeaker: String?? = .none
+        var buffer = ""
+        for s in segments {
+            if currentSpeaker != .some(s.speaker) {
+                if !buffer.isEmpty { lines.append(buffer) }
+                currentSpeaker = .some(s.speaker)
+                buffer = "\(speakerName(s.speaker)): \(s.text)"
+            } else {
+                buffer += " " + s.text
+            }
+        }
+        if !buffer.isEmpty { lines.append(buffer) }
+        return lines.joined(separator: "\n")
     }
 
     /// Testo con orari, per esportazione e lettura.
     var timedTranscript: String {
-        segments.map { "[\(formatTime($0.start))] \($0.text)" }.joined(separator: "\n")
+        segments.map { seg in
+            let who = diarized && seg.speaker != nil ? "\(speakerName(seg.speaker)): " : ""
+            return "[\(formatTime(seg.start))] \(who)\(seg.text)"
+        }.joined(separator: "\n")
     }
 
     /// Versione compatta per Claude: un orario circa ogni minuto invece che a ogni frase
@@ -74,14 +147,18 @@ final class Recording {
         var blocks: [String] = []
         var blockStart: Double = -1000
         var current = ""
+        var lastSpeaker: String?? = .none
         for segment in segments {
-            if segment.start - blockStart >= 60 {
+            let speakerChanged = diarized && lastSpeaker != .some(segment.speaker)
+            if segment.start - blockStart >= 60 || speakerChanged {
                 if !current.isEmpty { blocks.append(current) }
                 blockStart = segment.start
-                current = "[\(formatTime(segment.start))] \(segment.text)"
+                let who = diarized && segment.speaker != nil ? "\(speakerName(segment.speaker)): " : ""
+                current = "[\(formatTime(segment.start))] \(who)\(segment.text)"
             } else {
                 current += " " + segment.text
             }
+            lastSpeaker = .some(segment.speaker)
         }
         if !current.isEmpty { blocks.append(current) }
         return blocks.joined(separator: "\n")

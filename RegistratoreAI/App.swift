@@ -8,6 +8,6 @@ struct RegistratoreAIApp: App {
             ContentView()
                 .tint(Theme.accent)
         }
-        .modelContainer(for: [Recording.self, Summary.self, CustomTemplate.self, GlossaryEntry.self])
+        .modelContainer(for: [Recording.self, Summary.self, CustomTemplate.self, GlossaryEntry.self, VoiceProfile.self])
     }
 }
