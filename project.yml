@@ -1,0 +1,44 @@
+name: RegistratoreAI
+options:
+  bundleIdPrefix: it.registratoreai
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+targets:
+  RegistratoreAI:
+    type: application
+    platform: iOS
+    sources:
+      - path: RegistratoreAI
+    info:
+      path: RegistratoreAI/Info.plist
+      properties:
+        CFBundleDisplayName: Registratore AI
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: Serve il microfono per registrare riunioni, assemblee e appunti vocali.
+        NSSpeechRecognitionUsageDescription: La trascrizione avviene sul tuo iPhone, senza inviare l'audio in rete.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: it.registratoreai.app
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: "NO"
+        ENABLE_PREVIEWS: "NO"
