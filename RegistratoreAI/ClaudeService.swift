@@ -9,9 +9,9 @@ enum ClaudeModel: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .sonnet: return "Sonnet – equilibrato"
-        case .haiku: return "Haiku – il più economico"
-        case .opus: return "Opus – il più accurato (costa di più)"
+        case .sonnet: return "Equilibrato (consigliato)"
+        case .haiku: return "Economico"
+        case .opus: return "Massima qualità (costa di più)"
         }
     }
 
@@ -68,20 +68,20 @@ enum ClaudeFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingKey:
-            return "Inserisci la chiave API di Claude in Impostazioni."
+            return "Inserisci la chiave API dell'AI avanzata in Impostazioni."
         case .http(let code, let message):
             let lower = message.lowercased()
             if lower.contains("credit") || lower.contains("balance") {
-                return "Credito API esaurito. Ricarica su platform.claude.com (Billing)."
+                return "Credito API esaurito. Ricarica il credito dal sito del servizio (Billing)."
             }
             switch code {
             case 401: return "Chiave API non valida. Controllala in Impostazioni."
             case 429: return "Troppe richieste ravvicinate. Riprova tra poco."
-            case 529, 503: return "Claude è sovraccarico in questo momento. Riprova tra poco."
-            default: return "Errore di Claude (\(code)): \(message)"
+            case 529, 503: return "Il servizio AI è sovraccarico in questo momento. Riprova tra poco."
+            default: return "Errore del servizio AI (\(code)): \(message)"
             }
         case .emptyResponse:
-            return "Claude non ha restituito testo."
+            return "L'AI non ha restituito testo."
         }
     }
 }
@@ -258,7 +258,7 @@ enum ClaudeService {
 
     private static func withTruncationNotice(_ reply: ClaudeReply) -> ClaudeReply {
         guard reply.truncated else { return reply }
-        return ClaudeReply(text: reply.text + "\n\n[⚠︎ Risposta interrotta perché troppo lunga: chiedi a Claude di continuare.]",
+        return ClaudeReply(text: reply.text + "\n\n[⚠︎ Risposta interrotta perché troppo lunga: chiedi all'AI di continuare.]",
                            costUSD: reply.costUSD, truncated: true)
     }
 
@@ -302,7 +302,7 @@ enum ClaudeService {
         var result = segments
         var totalCost = 0.0
         for (n, chunk) in chunks.enumerated() {
-            await progress("Claude rivede la parte \(n + 1) di \(chunks.count)…")
+            await progress("L'AI migliora la parte \(n + 1) di \(chunks.count)…")
             let body = chunk.map { "\($0)|\(segments[$0].text)" }.joined(separator: "\n")
             let reply = try await send(cachedContext: instructions,
                                        messages: [ClaudeMessage(role: "user", content: body)],

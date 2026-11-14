@@ -25,7 +25,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Trascrizione")
                 } footer: {
-                    Text("La lingua in cui si parla nelle registrazioni. I riassunti sono sempre in italiano. Per ritrascrivere una registrazione già fatta: menu ⋯ > Rifai la trascrizione.")
+                    Text("La lingua in cui si parla nelle registrazioni. Le elaborazioni sono sempre in italiano. Per ritrascrivere una registrazione già fatta: menu ⋯ > Rifai la trascrizione.")
                 }
 
                 Section {
@@ -55,13 +55,13 @@ struct SettingsView: View {
                             .foregroundStyle(testOK ? .green : .red)
                     }
                 } header: {
-                    Text("Claude")
+                    Text("AI avanzata (online)")
                 } footer: {
-                    Text("La chiave si crea su platform.claude.com, in Settings > API keys. Resta salvata solo in questo iPhone, nel Portachiavi. A Claude viene inviato solo il testo della trascrizione, mai l'audio.")
+                    Text("Incolla la chiave API del tuo account del servizio AI (Settings > API keys). Resta salvata solo in questo iPhone, nel Portachiavi. All'AI viene inviato solo il testo della trascrizione, mai l'audio.")
                 }
 
                 Section {
-                    Picker("Per i riassunti", selection: $summaryModelRaw) {
+                    Picker("Per le elaborazioni", selection: $summaryModelRaw) {
                         ForEach(ClaudeModel.allCases) { model in
                             Text(model.label).tag(model.rawValue)
                         }
@@ -72,9 +72,9 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Modelli Claude")
+                    Text("Qualità dell'AI avanzata")
                 } footer: {
-                    Text("Consigliato: Sonnet per i riassunti, Haiku per le domande. Haiku costa circa venti volte meno di Sonnet. Per risparmiare, la trascrizione viene tenuta in memoria da Claude per 5 minuti: riassunti e domande fatti di seguito sulla stessa registrazione costano molto meno.")
+                    Text("Consigliato: Equilibrato per le elaborazioni, Economico per le domande (costa circa venti volte meno). Per risparmiare, la trascrizione resta in memoria per 5 minuti: elaborazioni e domande fatte di seguito sulla stessa registrazione costano molto meno.")
                 }
 
                 Section {
@@ -83,14 +83,14 @@ struct SettingsView: View {
                 } header: {
                     Text("Questo mese")
                 } footer: {
-                    Text("Stima calcolata dall'app. Il saldo esatto è su platform.claude.com, nelle sezioni Usage e Billing.")
+                    Text("Stima calcolata dall'app. Il saldo esatto è nel tuo account del servizio AI, nelle sezioni Usage e Billing.")
                 }
 
                 Section {
                     NavigationLink {
                         TemplatesListView()
                     } label: {
-                        Label("Modelli di riassunto", systemImage: "list.bullet.rectangle")
+                        Label("Modelli di elaborazione", systemImage: "list.bullet.rectangle")
                     }
                     NavigationLink {
                         GlossaryView()
@@ -102,9 +102,9 @@ struct SettingsView: View {
                 Section("Informazioni") {
                     LabeledContent("Versione", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                     if let message = SummaryService.availabilityMessage {
-                        Text("Modello Apple: \(message)").font(.footnote)
+                        Text("AI sul telefono: \(message)").font(.footnote)
                     } else {
-                        Label("Modello Apple sul telefono disponibile", systemImage: "iphone")
+                        Label("AI sul telefono disponibile", systemImage: "iphone")
                             .font(.footnote)
                     }
                 }
@@ -131,7 +131,7 @@ struct SettingsView: View {
                 hasKey = true
                 keyInput = ""
                 testOK = true
-                testResult = "Funziona: Claude è collegato."
+                testResult = "Funziona: l'AI avanzata è collegata."
             } catch {
                 testOK = false
                 testResult = error.localizedDescription
@@ -148,7 +148,7 @@ struct SettingsView: View {
             do {
                 try await ClaudeService.test(key: key)
                 testOK = true
-                testResult = "Funziona: Claude è collegato."
+                testResult = "Funziona: l'AI avanzata è collegata."
             } catch {
                 testOK = false
                 testResult = error.localizedDescription
@@ -211,7 +211,7 @@ struct TemplatesListView: View {
                 Text("Apri un predefinito e tocca \"Duplica\" per partire da quello.")
             }
         }
-        .navigationTitle("Modelli di riassunto")
+        .navigationTitle("Modelli di elaborazione")
         .sheet(isPresented: $showNew) {
             TemplateEditorView(template: nil, startingFrom: draftFrom)
         }
@@ -276,7 +276,7 @@ struct TemplateEditorView: View {
                     TextField("Istruzioni", text: $instructions, axis: .vertical)
                         .lineLimit(8...30)
                 } header: {
-                    Text("Istruzioni per il riassunto")
+                    Text("Istruzioni per l'elaborazione")
                 } footer: {
                     Text("Esempio: \"Riassumi una riunione di condominio. Sezioni: 1. Presenti 2. Problemi segnalati 3. Spese approvate con importi 4. Lavori decisi e tempi 5. Cose da fare\". Le regole comuni (italiano, niente invenzioni) vengono aggiunte da sole.")
                 }

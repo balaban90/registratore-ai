@@ -10,7 +10,7 @@ struct RecordingSection: Identifiable {
 
 enum RecordingFilter: String, CaseIterable, Identifiable {
     case all = "Tutte"
-    case summarized = "Con riassunto"
+    case summarized = "Con elaborazioni"
     case pending = "Da trascrivere"
     var id: String { rawValue }
 }
@@ -174,7 +174,7 @@ struct ContentView: View {
                 }
                 Button("Annulla", role: .cancel) {}
             } message: {
-                Text("Audio, trascrizione e riassunti verranno cancellati.")
+                Text("Audio, trascrizione ed elaborazioni verranno cancellati.")
             }
         }
         .tint(Theme.accent)
@@ -330,7 +330,7 @@ struct RecordingCard: View {
             Spacer(minLength: 4)
 
             if !recording.summaries.isEmpty {
-                StatusPill(text: "Riassunto", background: Color(red: 0.953, green: 0.91, blue: 1.0), foreground: Color(red: 0.42, green: 0.129, blue: 0.659))
+                StatusPill(text: "Elaborato", background: Color(red: 0.953, green: 0.91, blue: 1.0), foreground: Color(red: 0.42, green: 0.129, blue: 0.659))
             } else if recording.transcript != nil {
                 StatusPill(text: "Trascritto", background: Color(red: 0.878, green: 0.929, blue: 1.0), foreground: Color(red: 0.043, green: 0.31, blue: 0.69))
             } else {

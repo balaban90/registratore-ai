@@ -30,7 +30,7 @@ struct AskClaudeView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             if messages.isEmpty {
-                                Text("Fai una domanda su \"\(recording.title)\". Claude risponde in base alla trascrizione.")
+                                Text("Fai una domanda su \"\(recording.title)\". L'AI risponde in base alla trascrizione.")
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                                 ForEach(suggestions, id: \.self) { s in
@@ -52,7 +52,7 @@ struct AskClaudeView: View {
                                 bubble(message).id(message.id)
                             }
                             if isLoading {
-                                HStack { ProgressView(); Text("Claude sta scrivendo…").font(.callout) }
+                                HStack { ProgressView(); Text("L'AI sta scrivendo…").font(.callout) }
                                     .id("loading")
                             }
                             if let errorText {
@@ -70,7 +70,7 @@ struct AskClaudeView: View {
 
                 Divider()
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Chiedi a Claude…", text: $input, axis: .vertical)
+                    TextField("Chiedi all'AI…", text: $input, axis: .vertical)
                         .lineLimit(1...5)
                         .textFieldStyle(.roundedBorder)
                         .focused($inputFocused)
@@ -84,7 +84,7 @@ struct AskClaudeView: View {
                 .padding()
             }
             .tint(Theme.accent)
-            .navigationTitle("Chiedi a Claude")
+            .navigationTitle("Chiedi all'AI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -134,7 +134,7 @@ struct AskClaudeView: View {
                     } label: { Label("Copia", systemImage: "doc.on.doc") }
                     Button {
                         saveAsSummary(message)
-                    } label: { Label("Salva nei riassunti", systemImage: "tray.and.arrow.down") }
+                    } label: { Label("Salva nelle elaborazioni", systemImage: "tray.and.arrow.down") }
                 }
                 .font(.caption)
             }
@@ -168,11 +168,11 @@ struct AskClaudeView: View {
     private func saveAsSummary(_ message: ClaudeMessage) {
         let index = messages.firstIndex(of: message) ?? messages.count
         let question = messages[..<index].last(where: { $0.role == "user" })?.content ?? "Domanda"
-        let summary = Summary(templateID: "domanda", templateName: "Claude: \(question.prefix(60))", text: message.content)
+        let summary = Summary(templateID: "domanda", templateName: "Domanda: \(question.prefix(60))", text: message.content)
         summary.recording = recording
         context.insert(summary)
         try? context.save()
-        flash("Salvato nei riassunti")
+        flash("Salvato nelle elaborazioni")
     }
 
     private func flash(_ text: String) {

@@ -17,7 +17,7 @@ struct GlossaryView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.right).font(.body.weight(.medium)).foregroundStyle(.primary)
                             if entry.wrong.isEmpty {
-                                Text("Solo come riferimento per Claude").font(.caption).foregroundStyle(.secondary)
+                                Text("Solo come riferimento per l'AI").font(.caption).foregroundStyle(.secondary)
                             } else {
                                 Text("sostituisce \"\(entry.wrong)\"").font(.caption).foregroundStyle(.secondary)
                             }
@@ -34,7 +34,7 @@ struct GlossaryView: View {
                     Label("Aggiungi voce", systemImage: "plus.circle.fill")
                 }
             } footer: {
-                Text("Le sostituzioni si applicano da sole a ogni nuova trascrizione, gratis. Per quelle già fatte: menu ⋯ della trascrizione > Applica il glossario. I termini corretti vengono passati anche a Claude quando rivede una trascrizione.")
+                Text("Le sostituzioni si applicano da sole a ogni nuova trascrizione, gratis. Per quelle già fatte: menu ⋯ della trascrizione > Applica il glossario. I termini corretti vengono passati anche all'AI quando migliora una trascrizione.")
             }
 
         }
@@ -72,7 +72,7 @@ struct GlossaryEditor: View {
                 } header: {
                     Text("Come lo sbaglia la trascrizione")
                 } footer: {
-                    Text("Copialo da una trascrizione in cui è uscito sbagliato. Lascialo vuoto se vuoi solo che Claude conosca il termine (nomi di persone, luoghi, sigle, termini tecnici).")
+                    Text("Copialo da una trascrizione in cui è uscito sbagliato. Lascialo vuoto se vuoi solo che l'AI conosca il termine (nomi di persone, luoghi, sigle, termini tecnici).")
                 }
             }
             .navigationTitle(entry == nil ? "Nuova voce" : "Modifica voce")

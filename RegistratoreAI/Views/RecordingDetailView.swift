@@ -7,7 +7,7 @@ struct ShareItem: Identifiable {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case summaries = "Riassunti"
+    case summaries = "Elaborazioni"
     case transcript = "Trascrizione"
     case notes = "Note"
     var id: String { rawValue }
@@ -92,7 +92,7 @@ struct RecordingDetailView: View {
         }
         .overlay(alignment: .top) {
             if copiedNotice {
-                Text("Testo copiato: incollalo in Claude se non compare tra le app")
+                Text("Testo copiato: incollalo nella tua app AI se non compare tra le app")
                     .font(.footnote)
                     .padding(10)
                     .glass(cornerRadius: 20)
@@ -172,7 +172,7 @@ struct RecordingDetailView: View {
             HStack(spacing: 10) {
                 Menu {
                     if claudeReady {
-                        Section("Con Claude") {
+                        Section("AI avanzata (online)") {
                             ForEach(templates) { template in
                                 Button { summarizeWithClaude(template) } label: {
                                     Label(template.name, systemImage: template.icon)
@@ -180,7 +180,7 @@ struct RecordingDetailView: View {
                             }
                         }
                     }
-                    Section("Sul telefono, offline") {
+                    Section("AI sul telefono (offline)") {
                         ForEach(templates) { template in
                             Button { summarize(with: template) } label: {
                                 Label(template.name, systemImage: template.icon)
@@ -188,7 +188,7 @@ struct RecordingDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Nuovo riassunto", systemImage: "sparkles")
+                    Label("Nuova elaborazione", systemImage: "sparkles")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -200,7 +200,7 @@ struct RecordingDetailView: View {
                     Button {
                         showAsk = true
                     } label: {
-                        Label("Chiedi a Claude", systemImage: "bubble.left")
+                        Label("Chiedi all'AI", systemImage: "bubble.left")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 46)
                             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -208,7 +208,7 @@ struct RecordingDetailView: View {
                     }
                 } else {
                     sendToClaudeMenu {
-                        Label("Invia a Claude", systemImage: "paperplane")
+                        Label("Condividi con un'app AI", systemImage: "paperplane")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 46)
                             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -218,7 +218,7 @@ struct RecordingDetailView: View {
             }
 
             if !claudeReady {
-                Text("Per i riassunti con Claude dentro l'app, inserisci la chiave API in Impostazioni.")
+                Text("Per usare l'AI avanzata dentro l'app, inserisci la chiave API in Impostazioni.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let message = SummaryService.availabilityMessage {
@@ -226,7 +226,7 @@ struct RecordingDetailView: View {
             }
 
             if recording.summaries.isEmpty {
-                Text("Nessun riassunto. Scegli un modello da \"Nuovo riassunto\".")
+                Text("Nessuna elaborazione. Scegli un modello da \"Nuova elaborazione\".")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -271,7 +271,7 @@ struct RecordingDetailView: View {
 
     private func sendToClaudeMenu<L: View>(@ViewBuilder label: () -> L) -> some View {
         Menu {
-            Section("Invia all'app Claude") {
+            Section("Condividi con un'app AI") {
                 ForEach(templates) { template in
                     Button { sendToClaude(with: template) } label: {
                         Label(template.name, systemImage: template.icon)
@@ -293,7 +293,7 @@ struct RecordingDetailView: View {
             HStack {
                 if recording.revisedByClaude {
                     Picker("Versione", selection: $showOriginal) {
-                        Text("Rivista").tag(false)
+                        Text("Migliorata").tag(false)
                         Text("Originale").tag(true)
                     }
                     .pickerStyle(.segmented)
@@ -304,7 +304,7 @@ struct RecordingDetailView: View {
             }
 
             if let revisionCost {
-                Text("Revisione completata · \(formatUSD(revisionCost))")
+                Text("Trascrizione migliorata · \(formatUSD(revisionCost))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -365,7 +365,7 @@ struct RecordingDetailView: View {
                 Button {
                     reviseWithClaude()
                 } label: {
-                    Label(recording.revisedByClaude ? "Rivedi di nuovo con Claude" : "Rivedi con Claude (≈1 cent/ora)", systemImage: "wand.and.stars")
+                    Label(recording.revisedByClaude ? "Migliora di nuovo con l'AI" : "Migliora con l'AI (≈1 cent/ora)", systemImage: "wand.and.stars")
                 }
             }
             Button {
@@ -432,7 +432,7 @@ struct RecordingDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Invia all'app Claude", systemImage: "paperplane")
+                    Label("Condividi con un'app AI", systemImage: "paperplane")
                 }
             }
             Button {
@@ -529,7 +529,7 @@ struct RecordingDetailView: View {
         guard !base.isEmpty else { return }
         isRevising = true
         errorText = nil
-        progressText = "Claude rivede la trascrizione…"
+        progressText = "L'AI migliora la trascrizione…"
         let title = recording.title
         let notes = recording.notes
         let terms = Glossary.termsForClaude(glossary)
@@ -548,7 +548,7 @@ struct RecordingDetailView: View {
                 try? context.save()
                 revisionCost = result.cost
             } catch {
-                errorText = "Revisione non riuscita: \(error.localizedDescription)"
+                errorText = "Miglioramento non riuscito: \(error.localizedDescription)"
             }
             isRevising = false
         }
@@ -558,13 +558,13 @@ struct RecordingDetailView: View {
         guard recording.transcript != nil, !isSummarizing else { return }
         isSummarizing = true
         errorText = nil
-        progressText = "Claude sta scrivendo il riassunto…"
+        progressText = "L'AI sta scrivendo l'elaborazione…"
         let title = recording.title
         let transcript = recording.compactTranscript
         Task {
             do {
                 let reply = try await ClaudeService.summarize(title: title, transcript: transcript, template: template)
-                let summary = Summary(templateID: template.id, templateName: "\(template.name) · Claude", text: reply.text, costUSD: reply.costUSD)
+                let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
                 summary.recording = recording
                 context.insert(summary)
                 try? context.save()
@@ -614,7 +614,7 @@ struct SummaryCard: View {
                     .foregroundStyle(tile.foreground)
                     .frame(width: 28, height: 28)
                     .background(tile.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                Text(summary.templateName)
+                Text(summary.displayName)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 Spacer()
@@ -637,7 +637,7 @@ struct SummaryCard: View {
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
-                .accessibilityLabel("Azioni sul riassunto")
+                .accessibilityLabel("Azioni sull'elaborazione")
             }
             MarkdownText(text: summary.text)
         }

@@ -9,8 +9,8 @@ enum SummaryFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable(let message): return message
-        case .tooLong: return "Il testo è troppo lungo per il modello sul dispositivo. Usa \"Invia a Claude\"."
-        case .blocked: return "Il modello Apple si è rifiutato di elaborare questo contenuto. Usa \"Invia a Claude\"."
+        case .tooLong: return "Il testo è troppo lungo per l'AI sul telefono. Usa l'AI avanzata."
+        case .blocked: return "L'AI sul telefono si è rifiutata di elaborare questo contenuto. Usa l'AI avanzata."
         }
     }
 }
@@ -29,13 +29,13 @@ enum SummaryService {
         case .unavailable(let reason):
             switch reason {
             case .deviceNotEligible:
-                return "Questo iPhone non supporta Apple Intelligence. Usa \"Invia a Claude\"."
+                return "Questo iPhone non supporta Apple Intelligence. Usa l'AI avanzata."
             case .appleIntelligenceNotEnabled:
                 return "Attiva Apple Intelligence in Impostazioni > Apple Intelligence e Siri."
             case .modelNotReady:
-                return "Il modello Apple si sta ancora scaricando. Riprova tra qualche minuto."
+                return "L'AI sul telefono si sta ancora scaricando. Riprova tra qualche minuto."
             @unknown default:
-                return "Il modello Apple non è disponibile al momento."
+                return "L'AI sul telefono non è disponibile al momento."
             }
         }
     }
@@ -60,7 +60,7 @@ enum SummaryService {
             isNotes = true
         }
 
-        await progress("Scrivo il riassunto…")
+        await progress("Scrivo l'elaborazione…")
         let instructions = """
         Sei un assistente che riassume registrazioni. \(template.instructions)
 

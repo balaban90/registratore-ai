@@ -137,6 +137,13 @@ final class Summary {
     var costUSD: Double = 0
     var recording: Recording?
 
+    /// Nome da mostrare (le elaborazioni salvate dalle versioni precedenti dicevano "Claude").
+    var displayName: String {
+        templateName
+            .replacingOccurrences(of: " · Claude", with: " · AI")
+            .replacingOccurrences(of: "Claude: ", with: "Domanda: ")
+    }
+
     init(templateID: String, templateName: String, text: String, costUSD: Double = 0) {
         self.templateID = templateID
         self.templateName = templateName
