@@ -62,7 +62,7 @@ enum SummaryService {
 
         await progress("Scrivo il riassunto…")
         let instructions = """
-        Sei l'assistente di un sindacalista. \(template.instructions)
+        Sei un assistente che riassume registrazioni. \(template.instructions)
 
         \(SummaryTemplate.commonRules)
         """
@@ -75,7 +75,7 @@ enum SummaryService {
     private static func extractNotes(from chunk: String, part: Int, of total: Int) async throws -> String {
         let instructions = """
         Estrai da una parte di trascrizione gli appunti essenziali, in italiano, come elenco puntato.
-        Conserva: temi, richieste, posizioni di chi parla, decisioni, numeri, date, nomi, impegni.
+        Conserva: temi, concetti, posizioni di chi parla, decisioni, numeri, date, nomi, impegni.
         Non aggiungere nulla che non sia nel testo. Massimo 15 punti.
         """
         return try await ask(instructions: instructions, prompt: "Parte \(part) di \(total):\n\n\(chunk)")

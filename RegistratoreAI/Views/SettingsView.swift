@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(ClaudeService.summaryModelKey) private var summaryModelRaw = ClaudeModel.sonnet.rawValue
     @AppStorage(ClaudeService.chatModelKey) private var chatModelRaw = ClaudeModel.haiku.rawValue
+    @AppStorage(TranscriptionLanguage.defaultsKey) private var languageRaw = TranscriptionLanguage.italian.rawValue
 
     @State private var keyInput = ""
     @State private var hasKey = ClaudeService.isConfigured
@@ -15,6 +16,18 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("Lingua parlata", selection: $languageRaw) {
+                        ForEach(TranscriptionLanguage.allCases) { language in
+                            Text(language.label).tag(language.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Trascrizione")
+                } footer: {
+                    Text("La lingua in cui si parla nelle registrazioni. I riassunti sono sempre in italiano. Per ritrascrivere una registrazione già fatta: menu ⋯ > Rifai la trascrizione.")
+                }
+
                 Section {
                     if hasKey {
                         Label("Chiave API salvata", systemImage: "checkmark.seal.fill")
@@ -241,7 +254,7 @@ struct TemplateEditorView: View {
         NavigationStack {
             Form {
                 Section("Nome") {
-                    TextField("Es. Incontro RSU", text: $name)
+                    TextField("Es. Riunione di condominio", text: $name)
                 }
                 Section("Icona") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
@@ -264,7 +277,7 @@ struct TemplateEditorView: View {
                 } header: {
                     Text("Istruzioni per il riassunto")
                 } footer: {
-                    Text("Esempio: \"Riassumi un incontro con la RSU. Sezioni: 1. Presenti 2. Problemi segnalati per reparto 3. Proposte 4. Azioni da fare\". Le regole comuni (italiano, niente invenzioni, azioni da fare finali) vengono aggiunte da sole.")
+                    Text("Esempio: \"Riassumi una riunione di condominio. Sezioni: 1. Presenti 2. Problemi segnalati 3. Spese approvate con importi 4. Lavori decisi e tempi 5. Cose da fare\". Le regole comuni (italiano, niente invenzioni) vengono aggiunte da sole.")
                 }
             }
             .navigationTitle(template == nil ? "Nuovo modello" : "Modifica modello")

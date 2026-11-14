@@ -12,75 +12,105 @@ struct SummaryTemplate: Identifiable, Hashable {
         all + custom.sorted { $0.createdAt < $1.createdAt }.map(\.asTemplate)
     }
 
-    static let icons = ["star", "person.3", "megaphone", "building.2", "person.2", "doc.text", "note.text",
-                        "cross.case", "stethoscope", "calendar", "envelope", "list.bullet.clipboard",
-                        "scalemass", "exclamationmark.bubble", "graduationcap", "phone"]
+    static let icons = ["star", "bolt", "person.3", "person.2", "graduationcap", "mic", "phone", "lightbulb",
+                        "doc.text", "note.text", "briefcase", "cross.case", "house", "cart", "book",
+                        "calendar", "envelope", "list.bullet.clipboard", "heart", "airplane", "hammer", "music.note"]
 
     static let commonRules = """
     Scrivi sempre in italiano, in modo chiaro e sintetico.
     Usa solo informazioni presenti nella trascrizione: non inventare nomi, numeri, date o impegni.
     Se un'informazione manca o non è chiara, scrivi "non specificato".
     La trascrizione è automatica e può contenere errori di riconoscimento: correggi solo quelli evidenti.
-    Chiudi sempre con la sezione "Azioni da fare": elenco puntato con cosa, chi e quando (se detti).
+    Ometti le sezioni per cui la registrazione non contiene nulla.
     """
 
     static let all: [SummaryTemplate] = [
+        SummaryTemplate(
+            id: "sintesi",
+            name: "Sintesi veloce",
+            icon: "bolt",
+            instructions: """
+            Fai una sintesi veloce:
+            1. In una frase: di cosa si parla
+            2. I 5 punti più importanti (elenco puntato)
+            3. Cose da fare o da ricordare, se ce ne sono
+            """
+        ),
         SummaryTemplate(
             id: "riunione",
             name: "Riunione",
             icon: "person.3",
             instructions: """
-            Riassumi una riunione di lavoro con queste sezioni:
+            Riassumi una riunione con queste sezioni:
             1. In sintesi (3-5 righe)
-            2. Argomenti discussi (elenco puntato, uno per tema)
+            2. Argomenti discussi (un punto per tema)
             3. Decisioni prese
             4. Questioni aperte
-            5. Azioni da fare
+            5. Azioni da fare: cosa, chi, entro quando (se detti)
             """
         ),
         SummaryTemplate(
-            id: "assemblea",
-            name: "Assemblea",
-            icon: "megaphone",
+            id: "lezione",
+            name: "Lezione o corso",
+            icon: "graduationcap",
             instructions: """
-            Riassumi un'assemblea sindacale dei lavoratori con queste sezioni:
-            1. In sintesi (3-5 righe)
-            2. Temi presentati dai relatori
-            3. Interventi dei lavoratori: problemi e richieste emersi (raggruppati per tema)
-            4. Proposte e mandati votati o condivisi
-            5. Questioni aperte
-            6. Azioni da fare
+            Trasforma una lezione o un corso in appunti di studio:
+            1. Argomento e obiettivi
+            2. Concetti chiave, ciascuno spiegato in 2-3 righe
+            3. Definizioni, formule, date o dati importanti
+            4. Esempi citati
+            5. Possibili domande d'esame o di verifica
+            6. Punti da approfondire
             """
         ),
         SummaryTemplate(
-            id: "trattativa",
-            name: "Incontro con l'azienda",
-            icon: "building.2",
+            id: "intervista",
+            name: "Intervista",
+            icon: "mic",
             instructions: """
-            Riassumi un incontro o una trattativa tra sindacato e azienda con queste sezioni:
-            1. In sintesi (3-5 righe)
-            2. Posizioni e richieste della parte sindacale
-            3. Posizioni e risposte dell'azienda
-            4. Punti di accordo raggiunti
-            5. Punti di disaccordo o rinviati
-            6. Prossimi passi e date
-            7. Azioni da fare
-            Riporta con precisione numeri, scadenze, riferimenti a contratti, leggi o accordi citati.
+            Riassumi un'intervista:
+            1. Chi viene intervistato e su che tema (se detto)
+            2. Domande principali con la sintesi delle risposte
+            3. Frasi significative riportate testualmente tra virgolette
+            4. Temi e conclusioni emersi
             """
         ),
         SummaryTemplate(
             id: "colloquio",
-            name: "Colloquio individuale",
+            name: "Colloquio o consulenza",
             icon: "person.2",
             instructions: """
-            Riassumi un colloquio con un lavoratore o una lavoratrice con queste sezioni:
-            1. Motivo del colloquio
-            2. Situazione descritta (fatti, date, persone coinvolte)
-            3. Richieste della persona
-            4. Indicazioni e informazioni date
-            5. Documenti da raccogliere o verificare
-            6. Azioni da fare
-            Mantieni un tono neutro e riservato.
+            Riassumi un colloquio, un appuntamento o una consulenza (es. medico, avvocato, banca, scuola, lavoro):
+            1. Motivo dell'incontro
+            2. Situazione descritta (fatti, date, persone)
+            3. Informazioni, indicazioni o consigli ricevuti
+            4. Decisioni prese
+            5. Documenti, scadenze e prossimi passi
+            """
+        ),
+        SummaryTemplate(
+            id: "telefonata",
+            name: "Telefonata",
+            icon: "phone",
+            instructions: """
+            Riassumi una telefonata:
+            1. Con chi e per cosa
+            2. Cosa ci si è detti (punti principali)
+            3. Cosa è stato concordato
+            4. Prossimi passi, numeri, date e riferimenti da annotare
+            """
+        ),
+        SummaryTemplate(
+            id: "brainstorming",
+            name: "Idee e brainstorming",
+            icon: "lightbulb",
+            instructions: """
+            Organizza un brainstorming o una sessione di idee:
+            1. Obiettivo o problema di partenza
+            2. Idee emerse, raggruppate per tema
+            3. Pro e contro emersi per le idee principali
+            4. Idee più promettenti da sviluppare
+            5. Prossimi passi
             """
         ),
         SummaryTemplate(
@@ -88,7 +118,7 @@ struct SummaryTemplate: Identifiable, Hashable {
             name: "Verbale formale",
             icon: "doc.text",
             instructions: """
-            Redigi un verbale formale in terza persona con queste sezioni:
+            Redigi un verbale formale in terza persona:
             1. Oggetto dell'incontro
             2. Presenti (solo se nominati nella trascrizione)
             3. Svolgimento: punti trattati in ordine cronologico, con chi ha detto cosa quando è chiaro
@@ -106,7 +136,7 @@ struct SummaryTemplate: Identifiable, Hashable {
             1. Titolo breve
             2. Punti chiave (elenco puntato)
             3. Idee o promemoria
-            4. Azioni da fare
+            4. Cose da fare
             """
         )
     ]

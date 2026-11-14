@@ -9,16 +9,46 @@ enum TranscriptionFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .languageNotSupported:
-            return "L'italiano non è disponibile per la trascrizione su questo iPhone."
+            return "Questa lingua non è disponibile per la trascrizione su questo iPhone. Scegline un'altra in Impostazioni."
         case .empty:
             return "Non ho riconosciuto parlato in questa registrazione."
         }
     }
 }
 
+enum TranscriptionLanguage: String, CaseIterable, Identifiable {
+    case italian = "it-IT"
+    case englishUS = "en-US"
+    case englishUK = "en-GB"
+    case french = "fr-FR"
+    case german = "de-DE"
+    case spanish = "es-ES"
+    case portuguese = "pt-BR"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .italian: return "Italiano"
+        case .englishUS: return "Inglese (USA)"
+        case .englishUK: return "Inglese (UK)"
+        case .french: return "Francese"
+        case .german: return "Tedesco"
+        case .spanish: return "Spagnolo"
+        case .portuguese: return "Portoghese (Brasile)"
+        }
+    }
+
+    static let defaultsKey = "transcriptionLanguage"
+
+    static var current: TranscriptionLanguage {
+        TranscriptionLanguage(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .italian
+    }
+}
+
 /// Trascrizione interamente sul dispositivo con SpeechAnalyzer (iOS 26).
 enum TranscriptionService {
-    static let requestedLocale = Locale(identifier: "it-IT")
+    static var requestedLocale: Locale { Locale(identifier: TranscriptionLanguage.current.rawValue) }
 
     static func transcribe(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
         await progress("Preparo il riconoscimento vocale…")
@@ -35,7 +65,7 @@ enum TranscriptionService {
         )
 
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            await progress("Scarico il modello per l'italiano (solo la prima volta)…")
+            await progress("Scarico il modello per \(TranscriptionLanguage.current.label.lowercased()) (solo la prima volta)…")
             try await request.downloadAndInstall()
         }
 

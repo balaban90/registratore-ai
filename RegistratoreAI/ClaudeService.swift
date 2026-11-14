@@ -211,7 +211,7 @@ enum ClaudeService {
 
     static func context(title: String, transcript: String) -> String {
         """
-        Sei l'assistente di un funzionario sindacale della sanità. Scrivi sempre in italiano, in modo chiaro e sintetico.
+        Sei un assistente che aiuta a lavorare sulle registrazioni. Scrivi sempre in italiano, in modo chiaro e sintetico.
         Lavori sulla trascrizione automatica qui sotto: può contenere errori di riconoscimento, correggi solo quelli evidenti.
         Usa solo informazioni presenti nella trascrizione; se qualcosa manca, dillo invece di inventare.
         Gli orari tra parentesi quadre indicano il punto della registrazione.
@@ -270,8 +270,8 @@ enum ClaudeService {
     static func revise(segments: [TranscriptSegment], title: String, notes: String, glossaryTerms: String,
                        progress: @escaping @MainActor (String) -> Void) async throws -> (segments: [TranscriptSegment], cost: Double) {
         var instructions = """
-        Sei un correttore di trascrizioni automatiche in italiano, di riunioni sindacali nella sanità.
-        Ricevi righe nel formato numero|testo. Correggi SOLO errori evidenti di riconoscimento vocale:
+        Sei un correttore di trascrizioni automatiche.
+        Ricevi righe nel formato numero|testo. Mantieni la lingua originale. Correggi SOLO errori evidenti di riconoscimento vocale:
         parole storpiate, sigle, nomi propri, numeri, punteggiatura e maiuscole.
         NON riformulare, NON riassumere, NON togliere né aggiungere frasi, NON cambiare il senso.
         Se non sei sicuro di una correzione, lascia il testo com'è.

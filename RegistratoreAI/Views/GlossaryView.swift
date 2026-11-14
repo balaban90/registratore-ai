@@ -37,11 +37,6 @@ struct GlossaryView: View {
                 Text("Le sostituzioni si applicano da sole a ogni nuova trascrizione, gratis. Per quelle già fatte: menu ⋯ della trascrizione > Applica il glossario. I termini corretti vengono passati anche a Claude quando rivede una trascrizione.")
             }
 
-            if entries.isEmpty {
-                Section("Esempi") {
-                    Button("Aggiungi alcuni esempi del sindacato") { addExamples() }
-                }
-            }
         }
         .navigationTitle("Glossario")
         .sheet(isPresented: $showNew) {
@@ -52,21 +47,6 @@ struct GlossaryView: View {
         }
     }
 
-    private func addExamples() {
-        let examples: [(String, String)] = [
-            ("ci gi elle", "CGIL"),
-            ("cigielle", "CGIL"),
-            ("erre esse u", "RSU"),
-            ("ci ci enne elle", "CCNL"),
-            ("a esse esse ti", "ASST"),
-            ("", "Carlo Poma"),
-            ("", "FP CGIL")
-        ]
-        for (wrong, right) in examples {
-            context.insert(GlossaryEntry(wrong: wrong, right: right))
-        }
-        try? context.save()
-    }
 }
 
 struct GlossaryEditor: View {
@@ -80,19 +60,19 @@ struct GlossaryEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Es. CGIL, Carlo Poma, Ferri", text: $right)
+                    TextField("Es. un nome, una sigla, un termine tecnico", text: $right)
                         .autocorrectionDisabled()
                 } header: {
                     Text("Scritto correttamente")
                 }
                 Section {
-                    TextField("Es. ci gi elle (facoltativo)", text: $wrong)
+                    TextField("Facoltativo: come esce sbagliato", text: $wrong)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 } header: {
                     Text("Come lo sbaglia la trascrizione")
                 } footer: {
-                    Text("Copialo da una trascrizione in cui è uscito sbagliato. Lascialo vuoto se vuoi solo che Claude conosca il termine (nomi di persone, reparti, sigle).")
+                    Text("Copialo da una trascrizione in cui è uscito sbagliato. Lascialo vuoto se vuoi solo che Claude conosca il termine (nomi di persone, luoghi, sigle, termini tecnici).")
                 }
             }
             .navigationTitle(entry == nil ? "Nuova voce" : "Modifica voce")

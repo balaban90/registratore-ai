@@ -16,11 +16,11 @@ struct AskClaudeView: View {
     @FocusState private var inputFocused: Bool
 
     private let suggestions = [
-        "Quali impegni sono stati presi, da chi e con che scadenza?",
-        "Quali punti sono rimasti aperti?",
-        "Scrivi una mail ai colleghi con gli esiti",
-        "Scrivi un comunicato breve per i lavoratori",
-        "Ci sono numeri, date o riferimenti normativi citati?"
+        "Quali sono i punti più importanti?",
+        "Ci sono impegni, scadenze o cose da fare?",
+        "Scrivi una mail di resoconto",
+        "Elenca numeri, date e nomi citati",
+        "Spiegami meglio il concetto più complesso"
     ]
 
     var body: some View {

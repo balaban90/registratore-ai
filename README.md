@@ -6,15 +6,17 @@ Per i riassunti più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.2)
+## Cosa fa (versione 0.5)
 
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
 - Sceglie il microfono, mostra il livello del segnale e passa da solo a quello USB-C appena lo colleghi.
 - Segna i momenti importanti con la bandierina.
 - Importa file audio da File o da altre app.
-- Trascrive in italiano sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
-- Fa riassunti con 6 modelli: Riunione, Assemblea, Incontro con l'azienda, Colloquio individuale, Verbale formale, Appunto vocale. Ogni riassunto si chiude con le azioni da fare.
+- Trascrive sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
+- Fa riassunti con 9 modelli pronti: Sintesi veloce, Riunione, Lezione o corso, Intervista, Colloquio o consulenza, Telefonata, Idee e brainstorming, Verbale formale, Appunto vocale. Puoi aggiungere i tuoi.
+- Trascrive in italiano, inglese, francese, tedesco, spagnolo e portoghese (lingua da scegliere in Impostazioni).
+- Glossario con correzioni automatiche e revisione della trascrizione con Claude.
 - **Claude dentro l'app** (con chiave API, in Impostazioni ⚙︎): riassunto con Claude e "Chiedi a Claude" sulla registrazione (domande, mail, comunicati). A Claude va solo il testo.
 - **Modelli personalizzati**: crea, modifica o duplica i modelli di riassunto (Impostazioni > Modelli di riassunto).
 - **Invia all'app Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
