@@ -5,6 +5,16 @@ struct SummaryTemplate: Identifiable, Hashable {
     let name: String
     let icon: String
     let instructions: String
+    var isCustom: Bool = false
+
+    /// Modelli predefiniti + quelli creati dall'utente.
+    static func available(custom: [CustomTemplate]) -> [SummaryTemplate] {
+        all + custom.sorted { $0.createdAt < $1.createdAt }.map(\.asTemplate)
+    }
+
+    static let icons = ["star", "person.3", "megaphone", "building.2", "person.2", "doc.text", "note.text",
+                        "cross.case", "stethoscope", "calendar", "envelope", "list.bullet.clipboard",
+                        "scalemass", "exclamationmark.bubble", "graduationcap", "phone"]
 
     static let commonRules = """
     Scrivi sempre in italiano, in modo chiaro e sintetico.

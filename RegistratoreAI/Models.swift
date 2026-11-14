@@ -60,6 +60,26 @@ final class Recording {
     }
 }
 
+/// Modello di riassunto creato dall'utente.
+@Model
+final class CustomTemplate {
+    var id: UUID = UUID()
+    var name: String = ""
+    var icon: String = "star"
+    var instructions: String = ""
+    var createdAt: Date = Date.now
+
+    init(name: String, icon: String = "star", instructions: String) {
+        self.name = name
+        self.icon = icon
+        self.instructions = instructions
+    }
+
+    var asTemplate: SummaryTemplate {
+        SummaryTemplate(id: "custom-\(id.uuidString)", name: name, icon: icon, instructions: instructions, isCustom: true)
+    }
+}
+
 @Model
 final class Summary {
     var id: UUID = UUID()

@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @State private var showRecorder = false
     @State private var showImporter = false
+    @State private var showSettings = false
     @State private var importError: String?
     @State private var path: [Recording] = []
 
@@ -37,6 +38,13 @@ struct ContentView: View {
                 RecordingDetailView(recording: recording)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Label("Impostazioni", systemImage: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showImporter = true
@@ -58,6 +66,9 @@ struct ContentView: View {
                 }
                 .accessibilityLabel("Nuova registrazione")
                 .padding(.bottom, 8)
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
             .fullScreenCover(isPresented: $showRecorder) {
                 RecordView { finished in

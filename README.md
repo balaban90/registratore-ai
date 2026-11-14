@@ -6,7 +6,7 @@ Per i riassunti più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.1)
+## Cosa fa (versione 0.2)
 
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
@@ -15,7 +15,9 @@ Per i riassunti più accurati puoi inviare il testo all'app Claude.
 - Importa file audio da File o da altre app.
 - Trascrive in italiano sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
 - Fa riassunti con 6 modelli: Riunione, Assemblea, Incontro con l'azienda, Colloquio individuale, Verbale formale, Appunto vocale. Ogni riassunto si chiude con le azioni da fare.
-- **Invia a Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
+- **Claude dentro l'app** (con chiave API, in Impostazioni ⚙︎): riassunto con Claude e "Chiedi a Claude" sulla registrazione (domande, mail, comunicati). A Claude va solo il testo.
+- **Modelli personalizzati**: crea, modifica o duplica i modelli di riassunto (Impostazioni > Modelli di riassunto).
+- **Invia all'app Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
 - Esporta in PDF, RTF (si apre con Word e Pages), testo o audio.
 
 ## Prima installazione (una volta sola)
@@ -56,5 +58,5 @@ Quando Claude modifica il codice, GitHub ricompila da solo. Scarichi il nuovo .i
 Gli audio sono in **File > Sul mio iPhone > Registratore AI > Registrazioni**.
 
 ## Prossime versioni
-- **v2:** etichette per chi parla, widget e Live Activity, note e foto durante la registrazione, modelli personalizzati, domande sulla registrazione.
+- **v2:** etichette per chi parla, widget e Live Activity, note e foto durante la registrazione, note e foto.
 - **v3:** ricerca in tutto l'archivio, mappa mentale, copia su iCloud Drive.

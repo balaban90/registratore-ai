@@ -10,6 +10,13 @@ struct RecordingDetailView: View {
     @Bindable var recording: Recording
     @Environment(\.modelContext) private var context
     @StateObject private var player = AudioPlayer()
+    @Query(sort: \CustomTemplate.createdAt) private var customTemplates: [CustomTemplate]
+    @State private var showAsk = false
+    @State private var claudeReady = ClaudeService.isConfigured
+
+    private var templates: [SummaryTemplate] {
+        SummaryTemplate.available(custom: customTemplates)
+    }
 
     @State private var isTranscribing = false
     @State private var isSummarizing = false
@@ -79,6 +86,9 @@ struct RecordingDetailView: View {
         .sheet(item: $shareItem) { item in
             ActivityView(items: item.items)
         }
+        .sheet(isPresented: $showAsk) {
+            AskClaudeView(recording: recording)
+        }
         .overlay(alignment: .bottom) {
             if copiedNotice {
                 Text("Testo copiato: incollalo in Claude se non compare tra le app")
@@ -90,6 +100,7 @@ struct RecordingDetailView: View {
             }
         }
         .onAppear {
+            claudeReady = ClaudeService.isConfigured
             player.load(url: recording.audioURL)
             if !autoStarted && recording.transcript == nil && recording.transcriptionError == nil {
                 autoStarted = true
@@ -138,8 +149,29 @@ struct RecordingDetailView: View {
     private var summariesSection: some View {
         Section {
             if recording.transcript != nil {
+                if claudeReady {
+                    Menu {
+                        ForEach(templates) { template in
+                            Button {
+                                summarizeWithClaude(template)
+                            } label: {
+                                Label(template.name, systemImage: template.icon)
+                            }
+                        }
+                    } label: {
+                        Label("Riassunto con Claude", systemImage: "sparkles")
+                    }
+                    .disabled(isSummarizing || isTranscribing)
+
+                    Button {
+                        showAsk = true
+                    } label: {
+                        Label("Chiedi a Claude", systemImage: "bubble.left.and.text.bubble.right")
+                    }
+                }
+
                 Menu {
-                    ForEach(SummaryTemplate.all) { template in
+                    ForEach(templates) { template in
                         Button {
                             summarize(with: template)
                         } label: {
@@ -147,12 +179,12 @@ struct RecordingDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Nuovo riassunto (sul telefono)", systemImage: "sparkles")
+                    Label("Riassunto sul telefono (offline)", systemImage: "iphone")
                 }
                 .disabled(isSummarizing || isTranscribing)
 
                 Menu {
-                    ForEach(SummaryTemplate.all) { template in
+                    ForEach(templates) { template in
                         Button {
                             sendToClaude(with: template)
                         } label: {
@@ -160,9 +192,13 @@ struct RecordingDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Invia a Claude…", systemImage: "paperplane")
+                    Label("Invia all'app Claude…", systemImage: "paperplane")
                 }
 
+                if !claudeReady {
+                    Text("Per i riassunti con Claude dentro l'app, inserisci la chiave API in Impostazioni (icona ingranaggio).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if let message = SummaryService.availabilityMessage {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
@@ -286,6 +322,27 @@ struct RecordingDetailView: View {
                     progressText = message
                 }
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
+                summary.recording = recording
+                context.insert(summary)
+                try? context.save()
+            } catch {
+                errorText = error.localizedDescription
+            }
+            isSummarizing = false
+        }
+    }
+
+    private func summarizeWithClaude(_ template: SummaryTemplate) {
+        guard recording.transcript != nil, !isSummarizing else { return }
+        isSummarizing = true
+        errorText = nil
+        progressText = "Claude sta scrivendo il riassunto…"
+        let title = recording.title
+        let transcript = recording.timedTranscript
+        Task {
+            do {
+                let text = try await ClaudeService.summarize(title: title, transcript: transcript, template: template)
+                let summary = Summary(templateID: template.id, templateName: "\(template.name) · Claude", text: text)
                 summary.recording = recording
                 context.insert(summary)
                 try? context.save()
