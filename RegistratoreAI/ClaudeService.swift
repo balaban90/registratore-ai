@@ -56,6 +56,8 @@ struct ClaudeUsage: Decodable {
 struct ClaudeReply {
     let text: String
     let costUSD: Double
+    /// true se Claude si è fermato per il limite di lunghezza.
+    let truncated: Bool
 }
 
 enum ClaudeFailure: LocalizedError {
@@ -160,6 +162,7 @@ enum ClaudeService {
         }
         let content: [Block]
         let usage: ClaudeUsage?
+        let stop_reason: String?
     }
 
     private struct ErrorBody: Decodable {
@@ -199,7 +202,9 @@ enum ClaudeService {
         guard !text.isEmpty else { throw ClaudeFailure.emptyResponse }
         let cost = decoded.usage?.cost(for: model) ?? 0
         UsageTracker.add(cost)
-        return ClaudeReply(text: text.trimmingCharacters(in: .whitespacesAndNewlines), costUSD: cost)
+        return ClaudeReply(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                           costUSD: cost,
+                           truncated: decoded.stop_reason == "max_tokens")
     }
 
     // MARK: - Contesto condiviso (identico per riassunti e domande → cache)
@@ -227,12 +232,13 @@ enum ClaudeService {
         \(SummaryTemplate.commonRules)
         Non citare gli orari nel riassunto, salvo che servano.
         """
-        return try await send(
+        let reply = try await send(
             cachedContext: context(title: title, transcript: transcript),
             messages: [ClaudeMessage(role: "user", content: request)],
-            maxTokens: 2_500,
+            maxTokens: 4_000,
             model: summaryModel
         )
+        return withTruncationNotice(reply)
     }
 
     static func ask(title: String, transcript: String, notes: String, history: [ClaudeMessage]) async throws -> ClaudeReply {
@@ -240,13 +246,82 @@ enum ClaudeService {
         while let first = trimmed.first, first.role != "user" { trimmed.removeFirst() }
         var instructions = "Rispondi in modo conciso alle domande sulla registrazione. Quando citi un passaggio indica l'orario, ad esempio [12:30]."
         if !notes.isEmpty { instructions += "\n\nNote dell'utente sulla registrazione:\n\(notes)" }
-        return try await send(
+        let reply = try await send(
             cachedContext: context(title: title, transcript: transcript),
             instructions: instructions,
             messages: trimmed,
-            maxTokens: 1_200,
+            maxTokens: 3_000,
             model: chatModel
         )
+        return withTruncationNotice(reply)
+    }
+
+    private static func withTruncationNotice(_ reply: ClaudeReply) -> ClaudeReply {
+        guard reply.truncated else { return reply }
+        return ClaudeReply(text: reply.text + "\n\n[⚠︎ Risposta interrotta perché troppo lunga: chiedi a Claude di continuare.]",
+                           costUSD: reply.costUSD, truncated: true)
+    }
+
+    // MARK: - Revisione della trascrizione
+
+    /// Corregge solo gli errori evidenti di riconoscimento, riga per riga.
+    /// Usa sempre Haiku (economico). Le righe che Claude non restituisce, o che
+    /// cambia troppo, restano come nell'originale.
+    static func revise(segments: [TranscriptSegment], title: String, notes: String, glossaryTerms: String,
+                       progress: @escaping @MainActor (String) -> Void) async throws -> (segments: [TranscriptSegment], cost: Double) {
+        var instructions = """
+        Sei un correttore di trascrizioni automatiche in italiano, di riunioni sindacali nella sanità.
+        Ricevi righe nel formato numero|testo. Correggi SOLO errori evidenti di riconoscimento vocale:
+        parole storpiate, sigle, nomi propri, numeri, punteggiatura e maiuscole.
+        NON riformulare, NON riassumere, NON togliere né aggiungere frasi, NON cambiare il senso.
+        Se non sei sicuro di una correzione, lascia il testo com'è.
+        Restituisci TUTTE le righe ricevute, nello stesso formato numero|testo, una per riga,
+        nello stesso ordine, senza nessun altro testo prima o dopo.
+
+        Registrazione: "\(title)"
+        """
+        if !glossaryTerms.isEmpty {
+            instructions += "\nTermini e nomi che compaiono spesso (scritti correttamente): \(glossaryTerms)"
+        }
+        if !notes.isEmpty {
+            instructions += "\nNote dell'utente: \(notes)"
+        }
+
+        // Blocchi da circa 8.000 caratteri.
+        var chunks: [[Int]] = []
+        var current: [Int] = []
+        var size = 0
+        for (i, seg) in segments.enumerated() {
+            if size + seg.text.count > 8_000, !current.isEmpty {
+                chunks.append(current); current = []; size = 0
+            }
+            current.append(i); size += seg.text.count + 6
+        }
+        if !current.isEmpty { chunks.append(current) }
+
+        var result = segments
+        var totalCost = 0.0
+        for (n, chunk) in chunks.enumerated() {
+            await progress("Claude rivede la parte \(n + 1) di \(chunks.count)…")
+            let body = chunk.map { "\($0)|\(segments[$0].text)" }.joined(separator: "\n")
+            let reply = try await send(cachedContext: instructions,
+                                       messages: [ClaudeMessage(role: "user", content: body)],
+                                       maxTokens: 8_000, model: .haiku)
+            totalCost += reply.costUSD
+            for line in reply.text.components(separatedBy: "\n") {
+                guard let bar = line.firstIndex(of: "|"),
+                      let index = Int(line[..<bar].trimmingCharacters(in: .whitespaces)),
+                      chunk.contains(index) else { continue }
+                let corrected = String(line[line.index(after: bar)...]).trimmingCharacters(in: .whitespaces)
+                let original = segments[index].text
+                // Protezione: scarta correzioni che accorciano o allungano troppo la frase.
+                let ratio = Double(corrected.count) / Double(max(original.count, 1))
+                if !corrected.isEmpty && ratio > 0.6 && ratio < 1.6 {
+                    result[index].text = corrected
+                }
+            }
+        }
+        return (result, totalCost)
     }
 
     /// Verifica rapida della chiave con una richiesta minima.

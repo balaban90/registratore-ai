@@ -21,6 +21,9 @@ final class Recording {
     var transcript: String?
     var segmentsData: Data?
     var transcriptionError: String?
+    /// Trascrizione automatica originale, conservata quando Claude la rivede.
+    var originalSegmentsData: Data?
+    var revisedByClaude: Bool = false
     @Relationship(deleteRule: .cascade, inverse: \Summary.recording)
     var summaries: [Summary] = []
 
@@ -42,6 +45,16 @@ final class Recording {
         }
         set {
             segmentsData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var originalSegments: [TranscriptSegment] {
+        get {
+            guard let originalSegmentsData else { return [] }
+            return (try? JSONDecoder().decode([TranscriptSegment].self, from: originalSegmentsData)) ?? []
+        }
+        set {
+            originalSegmentsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
         }
     }
 
@@ -76,6 +89,21 @@ final class Recording {
 
     var sortedSummaries: [Summary] {
         summaries.sorted { $0.createdAt > $1.createdAt }
+    }
+}
+
+/// Voce del glossario: come la trascrizione sbaglia → come va scritto.
+/// Se `wrong` è vuoto, il termine serve solo a Claude come riferimento.
+@Model
+final class GlossaryEntry {
+    var id: UUID = UUID()
+    var wrong: String = ""
+    var right: String = ""
+    var createdAt: Date = Date.now
+
+    init(wrong: String, right: String) {
+        self.wrong = wrong
+        self.right = right
     }
 }
 

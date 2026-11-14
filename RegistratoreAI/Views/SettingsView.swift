@@ -79,6 +79,11 @@ struct SettingsView: View {
                     } label: {
                         Label("Modelli di riassunto", systemImage: "list.bullet.rectangle")
                     }
+                    NavigationLink {
+                        GlossaryView()
+                    } label: {
+                        Label("Glossario", systemImage: "character.book.closed")
+                    }
                 }
 
                 Section("Informazioni") {

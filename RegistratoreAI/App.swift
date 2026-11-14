@@ -7,6 +7,6 @@ struct RegistratoreAIApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [Recording.self, Summary.self, CustomTemplate.self])
+        .modelContainer(for: [Recording.self, Summary.self, CustomTemplate.self, GlossaryEntry.self])
     }
 }

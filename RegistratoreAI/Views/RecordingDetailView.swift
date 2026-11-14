@@ -11,6 +11,10 @@ struct RecordingDetailView: View {
     @Environment(\.modelContext) private var context
     @StateObject private var player = AudioPlayer()
     @Query(sort: \CustomTemplate.createdAt) private var customTemplates: [CustomTemplate]
+    @Query(sort: \GlossaryEntry.createdAt) private var glossary: [GlossaryEntry]
+    @State private var showOriginal = false
+    @State private var isRevising = false
+    @State private var revisionCost: Double?
     @State private var showAsk = false
     @State private var claudeReady = ClaudeService.isConfigured
 
@@ -53,7 +57,7 @@ struct RecordingDetailView: View {
                 }
             }
 
-            if isTranscribing || isSummarizing {
+            if isTranscribing || isSummarizing || isRevising {
                 Section {
                     HStack(spacing: 12) {
                         ProgressView()
@@ -240,7 +244,19 @@ struct RecordingDetailView: View {
                 }
                 .disabled(isTranscribing)
             } else {
-                ForEach(recording.segments) { segment in
+                if let revisionCost {
+                    Text("Revisione completata · costo \(formatUSD(revisionCost)). Le frasi corrette da Claude si confrontano con l'originale qui sotto.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if recording.revisedByClaude {
+                    Picker("Versione", selection: $showOriginal) {
+                        Text("Rivista da Claude").tag(false)
+                        Text("Originale").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                ForEach(showOriginal && recording.revisedByClaude ? recording.originalSegments : recording.segments) { segment in
                     Button {
                         player.seek(to: segment.start)
                     } label: {
@@ -260,9 +276,35 @@ struct RecordingDetailView: View {
                 Text("Trascrizione")
                 Spacer()
                 if recording.transcript != nil {
-                    Button("Rifai") { transcribe() }
-                        .font(.caption)
-                        .disabled(isTranscribing)
+                    Menu {
+                        if claudeReady {
+                            Button {
+                                reviseWithClaude()
+                            } label: {
+                                Label(recording.revisedByClaude ? "Rivedi di nuovo con Claude" : "Rivedi con Claude (≈1 cent/ora)", systemImage: "wand.and.stars")
+                            }
+                        }
+                        Button {
+                            applyGlossary()
+                        } label: {
+                            Label("Applica il glossario", systemImage: "character.book.closed")
+                        }
+                        if recording.revisedByClaude {
+                            Button(role: .destructive) {
+                                restoreOriginal()
+                            } label: {
+                                Label("Ripristina l'originale", systemImage: "arrow.uturn.backward")
+                            }
+                        }
+                        Button {
+                            transcribe()
+                        } label: {
+                            Label("Rifai la trascrizione", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .disabled(isTranscribing || isRevising)
                 }
             }
         }
@@ -305,7 +347,10 @@ struct RecordingDetailView: View {
                 let segments = try await TranscriptionService.transcribe(url: url) { message in
                     progressText = message
                 }
-                recording.segments = segments
+                recording.segments = Glossary.apply(glossary, to: segments)
+                recording.originalSegments = []
+                recording.revisedByClaude = false
+                showOriginal = false
                 recording.transcript = recording.plainTranscript
                 recording.transcriptionError = nil
                 try? context.save()
@@ -335,6 +380,56 @@ struct RecordingDetailView: View {
                 errorText = error.localizedDescription
             }
             isSummarizing = false
+        }
+    }
+
+    private func applyGlossary() {
+        recording.segments = Glossary.apply(glossary, to: recording.segments)
+        recording.transcript = recording.plainTranscript
+        try? context.save()
+    }
+
+    private func restoreOriginal() {
+        let original = recording.originalSegments
+        guard !original.isEmpty else { return }
+        recording.segments = original
+        recording.originalSegments = []
+        recording.revisedByClaude = false
+        recording.transcript = recording.plainTranscript
+        showOriginal = false
+        try? context.save()
+    }
+
+    private func reviseWithClaude() {
+        guard !isRevising else { return }
+        // Si rivede sempre partendo dalla trascrizione automatica originale.
+        let base = recording.revisedByClaude ? recording.originalSegments : recording.segments
+        guard !base.isEmpty else { return }
+        isRevising = true
+        errorText = nil
+        progressText = "Claude rivede la trascrizione…"
+        let title = recording.title
+        let notes = recording.notes
+        let terms = Glossary.termsForClaude(glossary)
+        Task {
+            do {
+                let result = try await ClaudeService.revise(segments: base, title: title, notes: notes, glossaryTerms: terms) { message in
+                    progressText = message
+                }
+                if !recording.revisedByClaude {
+                    recording.originalSegments = base
+                }
+                recording.segments = Glossary.apply(glossary, to: result.segments)
+                recording.revisedByClaude = true
+                recording.transcript = recording.plainTranscript
+                showOriginal = false
+                try? context.save()
+                progressText = ""
+                revisionCost = result.cost
+            } catch {
+                errorText = "Revisione non riuscita: \(error.localizedDescription)"
+            }
+            isRevising = false
         }
     }
 
