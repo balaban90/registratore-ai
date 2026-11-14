@@ -3,7 +3,8 @@ import SwiftData
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(ClaudeService.modelDefaultsKey) private var modelRaw = ClaudeModel.sonnet.rawValue
+    @AppStorage(ClaudeService.summaryModelKey) private var summaryModelRaw = ClaudeModel.sonnet.rawValue
+    @AppStorage(ClaudeService.chatModelKey) private var chatModelRaw = ClaudeModel.haiku.rawValue
 
     @State private var keyInput = ""
     @State private var hasKey = ClaudeService.isConfigured
@@ -47,17 +48,29 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Picker("Modello", selection: $modelRaw) {
+                    Picker("Per i riassunti", selection: $summaryModelRaw) {
                         ForEach(ClaudeModel.allCases) { model in
                             Text(model.label).tag(model.rawValue)
                         }
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    Picker("Per le domande", selection: $chatModelRaw) {
+                        ForEach(ClaudeModel.allCases) { model in
+                            Text(model.label).tag(model.rawValue)
+                        }
+                    }
                 } header: {
-                    Text("Modello Claude")
+                    Text("Modelli Claude")
                 } footer: {
-                    Text("Sonnet è il miglior compromesso. Haiku costa circa venti volte meno ed è adatto agli appunti brevi.")
+                    Text("Consigliato: Sonnet per i riassunti, Haiku per le domande. Haiku costa circa venti volte meno di Sonnet. Per risparmiare, la trascrizione viene tenuta in memoria da Claude per 5 minuti: riassunti e domande fatti di seguito sulla stessa registrazione costano molto meno.")
+                }
+
+                Section {
+                    LabeledContent("Spesa stimata", value: formatUSD(UsageTracker.monthTotal))
+                    LabeledContent("Richieste", value: "\(UsageTracker.monthRequests)")
+                } header: {
+                    Text("Questo mese")
+                } footer: {
+                    Text("Stima calcolata dall'app. Il saldo esatto è su platform.claude.com, nelle sezioni Usage e Billing.")
                 }
 
                 Section {

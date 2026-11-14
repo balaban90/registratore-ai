@@ -55,6 +55,25 @@ final class Recording {
         segments.map { "[\(formatTime($0.start))] \($0.text)" }.joined(separator: "\n")
     }
 
+    /// Versione compatta per Claude: un orario circa ogni minuto invece che a ogni frase
+    /// (meno token, stessa informazione).
+    var compactTranscript: String {
+        var blocks: [String] = []
+        var blockStart: Double = -1000
+        var current = ""
+        for segment in segments {
+            if segment.start - blockStart >= 60 {
+                if !current.isEmpty { blocks.append(current) }
+                blockStart = segment.start
+                current = "[\(formatTime(segment.start))] \(segment.text)"
+            } else {
+                current += " " + segment.text
+            }
+        }
+        if !current.isEmpty { blocks.append(current) }
+        return blocks.joined(separator: "\n")
+    }
+
     var sortedSummaries: [Summary] {
         summaries.sorted { $0.createdAt > $1.createdAt }
     }
@@ -87,11 +106,13 @@ final class Summary {
     var templateName: String = ""
     var text: String = ""
     var createdAt: Date = Date.now
+    var costUSD: Double = 0
     var recording: Recording?
 
-    init(templateID: String, templateName: String, text: String) {
+    init(templateID: String, templateName: String, text: String, costUSD: Double = 0) {
         self.templateID = templateID
         self.templateName = templateName
         self.text = text
+        self.costUSD = costUSD
     }
 }

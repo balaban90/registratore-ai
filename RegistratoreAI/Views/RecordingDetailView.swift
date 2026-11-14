@@ -209,7 +209,13 @@ struct RecordingDetailView: View {
                     SummaryDetailView(summary: summary, recordingTitle: recording.title)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(summary.templateName).font(.subheadline.weight(.semibold))
+                        HStack {
+                            Text(summary.templateName).font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if summary.costUSD > 0 {
+                                Text(formatUSD(summary.costUSD)).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
                         Text(summary.text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
@@ -338,11 +344,11 @@ struct RecordingDetailView: View {
         errorText = nil
         progressText = "Claude sta scrivendo il riassunto…"
         let title = recording.title
-        let transcript = recording.timedTranscript
+        let transcript = recording.compactTranscript
         Task {
             do {
-                let text = try await ClaudeService.summarize(title: title, transcript: transcript, template: template)
-                let summary = Summary(templateID: template.id, templateName: "\(template.name) · Claude", text: text)
+                let reply = try await ClaudeService.summarize(title: title, transcript: transcript, template: template)
+                let summary = Summary(templateID: template.id, templateName: "\(template.name) · Claude", text: reply.text, costUSD: reply.costUSD)
                 summary.recording = recording
                 context.insert(summary)
                 try? context.save()

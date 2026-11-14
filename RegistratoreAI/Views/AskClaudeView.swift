@@ -12,6 +12,7 @@ struct AskClaudeView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var savedNotice: String?
+    @State private var sessionCost: Double = 0
     @FocusState private var inputFocused: Bool
 
     private let suggestions = [
@@ -85,6 +86,13 @@ struct AskClaudeView: View {
             .navigationTitle("Chiedi a Claude")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if sessionCost > 0 {
+                        Text(formatUSD(sessionCost))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fine") { dismiss() }
                 }
@@ -135,12 +143,15 @@ struct AskClaudeView: View {
         errorText = nil
         messages.append(ClaudeMessage(role: "user", content: text))
         isLoading = true
-        let system = ClaudeService.chatSystemPrompt(title: recording.title, transcript: recording.timedTranscript, notes: recording.notes)
+        let title = recording.title
+        let transcript = recording.compactTranscript
+        let notes = recording.notes
         let history = messages
         Task {
             do {
-                let reply = try await ClaudeService.send(system: system, messages: history)
-                messages.append(ClaudeMessage(role: "assistant", content: reply))
+                let reply = try await ClaudeService.ask(title: title, transcript: transcript, notes: notes, history: history)
+                messages.append(ClaudeMessage(role: "assistant", content: reply.text))
+                sessionCost += reply.costUSD
             } catch {
                 errorText = error.localizedDescription
             }
