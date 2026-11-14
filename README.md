@@ -22,8 +22,10 @@ Per i riassunti più accurati puoi inviare il testo all'app Claude.
 
 ### 1. Caricare il codice su GitHub
 1. Su github.com crea un nuovo repository **privato** chiamato `registratore-ai`.
-2. Caricaci tutti i file di questa cartella, compresa la cartella nascosta `.github`.
-   (Se Claude ha già accesso al repository, lo carica lui.)
+2. Premi **Add file > Upload files** e trascina dentro il contenuto della cartella `registratore-ai`: la cartella `RegistratoreAI`, `project.yml` e `README.md`. Poi premi **Commit changes**.
+3. Il Mac nasconde la cartella `.github`, quindi il file che avvia la compilazione va creato a mano:
+   **Add file > Create new file**. Come nome scrivi esattamente `.github/workflows/build.yml` e incolla il contenuto di `COPIA-workflow-build.yml`. Poi premi **Commit changes**.
+   (Se colleghi GitHub a Claude nelle impostazioni di claude.ai, carica tutto lui.)
 
 ### 2. Far compilare l'app a GitHub
 1. Nel repository apri la scheda **Actions**.
