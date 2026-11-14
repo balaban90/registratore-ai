@@ -83,6 +83,7 @@ struct AskClaudeView: View {
                 }
                 .padding()
             }
+            .tint(Theme.accent)
             .navigationTitle("Chiedi a Claude")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -113,12 +114,17 @@ struct AskClaudeView: View {
     private func bubble(_ message: ClaudeMessage) -> some View {
         let isUser = message.role == "user"
         VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
-            Text(message.content)
-                .textSelection(.enabled)
+            Group {
+                if isUser {
+                    Text(message.content).textSelection(.enabled)
+                } else {
+                    MarkdownText(text: message.content)
+                }
+            }
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
-                        .fill(isUser ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
+                        .fill(isUser ? Theme.accentSoft : Color(.secondarySystemBackground))
                 )
             if !isUser {
                 HStack(spacing: 16) {

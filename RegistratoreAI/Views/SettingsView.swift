@@ -109,6 +109,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .tint(Theme.accent)
             .navigationTitle("Impostazioni")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

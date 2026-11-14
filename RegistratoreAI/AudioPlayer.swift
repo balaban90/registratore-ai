@@ -40,11 +40,11 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    func seek(to time: Double) {
+    func seek(to time: Double, play: Bool = true) {
         guard let player else { return }
         player.currentTime = max(0, min(time, player.duration))
         currentTime = player.currentTime
-        if !player.isPlaying { togglePlay() }
+        if play && !player.isPlaying { togglePlay() }
     }
 
     func skip(_ delta: Double) {

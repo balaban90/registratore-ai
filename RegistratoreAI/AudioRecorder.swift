@@ -24,6 +24,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published var isPaused = false
     @Published var elapsed: TimeInterval = 0
     @Published var level: Float = 0
+    /// Ultimi livelli, per disegnare la forma d'onda.
+    @Published var levels: [Float] = Array(repeating: 0, count: 44)
     @Published var highlights: [Double] = []
     @Published var inputs: [AudioInput] = []
     @Published var currentInputID: String?
@@ -72,6 +74,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
 
     private func isExternal(_ port: AVAudioSessionPortDescription) -> Bool {
         port.portType != .builtInMic
+    }
+
+    var isUsingExternalInput: Bool {
+        inputs.first(where: { $0.id == currentInputID })?.isExternal ?? false
     }
 
     func refreshInputs() {
@@ -200,6 +206,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             recorder.pause()
             isPaused = true
         }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     func addHighlight() {
@@ -219,6 +226,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         isRecording = false
         isPaused = false
         level = 0
+        levels = Array(repeating: 0, count: 44)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         return FinishedRecording(fileName: fileName, duration: max(duration, elapsed), highlights: highlights, inputName: currentInputName, startedAt: startedAt)
     }
@@ -242,6 +251,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         recorder.updateMeters()
         let db = recorder.averagePower(forChannel: 0)
         level = isPaused ? 0 : max(0, min(1, (db + 55) / 55))
+        if !isPaused {
+            levels.removeFirst()
+            levels.append(level)
+        }
         if recorder.isRecording {
             elapsed = recorder.currentTime
         }
