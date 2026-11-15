@@ -105,6 +105,9 @@ enum TranscriptionService {
         options.skipSpecialTokens = true
         options.wordTimestamps = true
         options.chunkingStrategy = .vad
+        // Mai saltare una finestra perché "sembra silenzio": WhisperKit scarterebbe 30 secondi interi.
+        // Con parlato sovrapposto o audio di qualità bassa capitava di perdere pezzi di registrazione.
+        options.noSpeechThreshold = nil
 
         await progress("Trascrivo con il motore Preciso (può richiedere qualche minuto)…")
         let results = try await pipe.transcribe(audioPath: url.path, decodeOptions: options)
@@ -126,8 +129,50 @@ enum TranscriptionService {
             }
         }
         segments.sort { $0.start < $1.start }
+
+        // Rete di sicurezza: se restano buchi, li riempie con il motore Veloce,
+        // così nessuna parte della registrazione va persa.
+        if hasGaps(segments, duration: audioDuration(url)) {
+            await progress("Controllo che non manchi nessuna parte…")
+            if let apple = try? await transcribeWithApple(url: url, progress: { _ in }) {
+                segments = fillGaps(segments, with: apple)
+            }
+        }
+
         guard !segments.isEmpty else { throw TranscriptionFailure.empty }
         return segments
+    }
+
+    /// Buco minimo (in secondi) oltre il quale si prova a recuperare il parlato.
+    private static let minGap = 6.0
+
+    private static func audioDuration(_ url: URL) -> Double {
+        guard let file = try? AVAudioFile(forReading: url) else { return 0 }
+        return Double(file.length) / file.processingFormat.sampleRate
+    }
+
+    private static func gaps(in segments: [TranscriptSegment], duration: Double) -> [(Double, Double)] {
+        var result: [(Double, Double)] = []
+        var cursor = 0.0
+        for s in segments {
+            if s.start - cursor >= minGap { result.append((cursor, s.start)) }
+            cursor = max(cursor, s.end)
+        }
+        if duration - cursor >= minGap { result.append((cursor, duration)) }
+        return result
+    }
+
+    private static func hasGaps(_ segments: [TranscriptSegment], duration: Double) -> Bool {
+        !gaps(in: segments, duration: duration).isEmpty
+    }
+
+    /// Inserisce le frasi del secondo motore che cadono interamente nei buchi del primo.
+    private static func fillGaps(_ segments: [TranscriptSegment], with other: [TranscriptSegment]) -> [TranscriptSegment] {
+        let holes = gaps(in: segments, duration: other.last?.end ?? 0)
+        let extra = other.filter { seg in
+            holes.contains { seg.start >= $0.0 - 0.5 && seg.end <= $0.1 + 0.5 }
+        }
+        return (segments + extra).sorted { $0.start < $1.start }
     }
 
     // MARK: - Apple (SpeechAnalyzer, iOS 26)
