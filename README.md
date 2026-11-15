@@ -6,7 +6,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.10)
+## Cosa fa (versione 0.11)
 
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
@@ -15,6 +15,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 - Importa file audio da File o da altre app.
 - Trascrive sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
 - Crea elaborazioni con 9 modelli pronti: Sintesi veloce, Riunione, Lezione o corso, Intervista, Colloquio o consulenza, Telefonata, Idee e brainstorming, Verbale formale, Appunto vocale. Puoi aggiungere i tuoi.
+- **Due motori di trascrizione**, entrambi sul telefono: *Veloce* (Apple) e *Preciso* (Whisper Large v3 Turbo, download di circa 630 MB la prima volta). Si sceglie in Impostazioni o da ⋯ > Rifai la trascrizione.
 - Trascrive in italiano, inglese, francese, tedesco, spagnolo e portoghese (lingua da scegliere in Impostazioni).
 - Separa i parlanti sul telefono (Persona 1, Persona 2…), con nomi modificabili e profili vocali per riconoscere le persone nelle registrazioni successive.
 - Glossario con correzioni automatiche e revisione della trascrizione con Claude.
@@ -22,7 +23,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 - **Parole incerte evidenziate:** le parole su cui il riconoscimento era poco sicuro sono colorate, così le controlli subito.
 - **"Migliora con l'AI" in un solo passaggio economico:** corregge le parole sbagliate (soprattutto quelle incerte), rimette punteggiatura ed elenchi, sistema chi parla in base al contenuto e propone i nomi o i ruoli dei parlanti (li confermi tu con "Applica").
 - **Claude dentro l'app** (con chiave API, in Impostazioni ⚙︎): elaborazione con Claude e "Chiedi a Claude" sulla registrazione (domande, mail, comunicati). A Claude va solo il testo.
-- **Motore giusto per ogni modello:** Riunione, Verbale, Intervista e simili usano l'AI avanzata; Sintesi veloce e Appunto vocale l'AI sul dispositivo (gratis). Con "Scegli il motore" puoi cambiarlo ogni volta, e nei tuoi modelli lo imposti tu.
+- **Motore giusto per ogni modello:** Riunione, Verbale, Intervista e simili usano l'AI avanzata; Sintesi veloce e Appunto vocale l'AI sul dispositivo (gratis). Dalla voce "Motore" in fondo al menu puoi forzarne uno, e nei tuoi modelli lo imposti tu.
 - **Modelli personalizzati**: crea, modifica o duplica i modelli di elaborazione (Impostazioni > Modelli di elaborazione).
 - **Invia all'app Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
 - Esporta in PDF, RTF (si apre con Word e Pages), testo o audio.
