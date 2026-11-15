@@ -1,0 +1,238 @@
+import Foundation
+import SwiftData
+
+/// Lavorazione automatica di una registrazione, come Plaud: dopo aver registrato
+/// fa tutto da sola, senza scelte tecniche.
+///
+/// 1. Trascrizione (motore scelto automaticamente) + glossario
+/// 2. Separazione dei parlanti
+/// 3. Miglioramento con l'AI (testo, parlanti, nomi, titolo), se c'è la chiave API
+/// 4. Sintesi veloce, che fa da anteprima nell'elenco
+/// 5. Titolo, se è ancora quello automatico
+@MainActor
+final class Pipeline: ObservableObject {
+    static let shared = Pipeline()
+
+    static let autoImproveKey = "autoImproveWithAI"
+    static let autoSummaryKey = "autoSummary"
+
+    static var autoImprove: Bool { UserDefaults.standard.object(forKey: autoImproveKey) as? Bool ?? true }
+    static var autoSummary: Bool { UserDefaults.standard.object(forKey: autoSummaryKey) as? Bool ?? true }
+
+    /// Cosa sta facendo, per registrazione.
+    @Published private(set) var status: [UUID: String] = [:]
+    /// Ultimo problema incontrato, per registrazione.
+    @Published var errors: [UUID: String] = [:]
+
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+
+    func isRunning(_ recording: Recording) -> Bool { tasks[recording.id] != nil }
+
+    // MARK: - Lavorazione completa
+
+    /// Esegue i passaggi che mancano. Con `retranscribe` riparte dalla trascrizione
+    /// (le elaborazioni già fatte restano).
+    func process(_ recording: Recording, in context: ModelContext, retranscribe: Bool = false) {
+        run(recording) { [self] in
+            if retranscribe || recording.transcript == nil {
+                try await transcribe(recording, in: context)
+            }
+            if DiarizationService.isEnabled && !recording.diarized {
+                await diarizeQuietly(recording, in: context)
+            }
+            if Self.autoImprove && ClaudeService.isConfigured && !recording.revisedByClaude {
+                await improveQuietly(recording, in: context, applyNames: true)
+            }
+            if Self.autoSummary && recording.summaries.isEmpty {
+                await summaryQuietly(recording, in: context)
+            }
+            if recording.hasDefaultTitle {
+                await titleQuietly(recording, in: context)
+            }
+        }
+    }
+
+    /// Solo la separazione dei parlanti (dal menu della registrazione).
+    func separateSpeakers(_ recording: Recording, in context: ModelContext) {
+        run(recording) { [self] in try await diarize(recording, in: context) }
+    }
+
+    /// Solo il miglioramento con l'AI (dal menu della registrazione).
+    func improve(_ recording: Recording, in context: ModelContext) {
+        run(recording) { [self] in try await revise(recording, in: context, applyNames: true) }
+    }
+
+    /// Riprende le registrazioni rimaste a metà (es. app chiusa durante la trascrizione).
+    func resumePending(_ recordings: [Recording], in context: ModelContext) {
+        for r in recordings where r.transcript == nil && r.transcriptionError == nil && !isRunning(r) {
+            process(r, in: context)
+        }
+    }
+
+    private func run(_ recording: Recording, _ work: @escaping () async throws -> Void) {
+        guard tasks[recording.id] == nil else { return }
+        let id = recording.id
+        errors[id] = nil
+        tasks[id] = Task {
+            do {
+                try await work()
+            } catch {
+                errors[id] = error.localizedDescription
+            }
+            status[id] = nil
+            tasks[id] = nil
+            if TranscriptionEngine.current == .automatic { WhisperModel.shared.downloadIfAppropriate() }
+        }
+    }
+
+    private func say(_ recording: Recording, _ text: String) { status[recording.id] = text }
+
+    // MARK: - Passaggi
+
+    private func glossary(_ context: ModelContext) -> [GlossaryEntry] {
+        (try? context.fetch(FetchDescriptor<GlossaryEntry>())) ?? []
+    }
+
+    private func transcribe(_ recording: Recording, in context: ModelContext) async throws {
+        let id = recording.id
+        say(recording, "Trascrivo…")
+        do {
+            let segments = try await TranscriptionService.transcribe(url: recording.audioURL) { [weak self] message in
+                self?.status[id] = message
+            }
+            recording.segments = Glossary.apply(glossary(context), to: segments)
+            recording.originalSegments = []
+            recording.revisedByClaude = false
+            recording.diarized = false
+            recording.speakerNames = [:]
+            recording.speakerSuggestions = [:]
+            recording.transcript = recording.plainTranscript
+            recording.transcriptionError = nil
+            try? context.save()
+        } catch {
+            recording.transcriptionError = error.localizedDescription
+            try? context.save()
+            throw error
+        }
+    }
+
+    private func diarize(_ recording: Recording, in context: ModelContext) async throws {
+        guard !recording.segments.isEmpty else { return }
+        let id = recording.id
+        say(recording, "Riconosco chi parla…")
+        let profiles = (try? context.fetch(FetchDescriptor<VoiceProfile>())) ?? []
+        let known = profiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
+        let profileNames = Dictionary(profiles.map { ($0.speakerKey, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let turns = try await DiarizationService.diarize(url: recording.audioURL, known: known) { [weak self] message in
+            self?.status[id] = message
+        }
+        let entries = glossary(context)
+        recording.segments = Glossary.apply(entries, to: DiarizationService.assign(turns, to: recording.segments))
+        if recording.revisedByClaude {
+            recording.originalSegments = Glossary.apply(entries, to: DiarizationService.assign(turns, to: recording.originalSegments))
+        }
+        var names: [String: String] = [:]
+        for speaker in recording.speakerOrder {
+            if let n = profileNames[speaker] { names[speaker] = n }
+        }
+        recording.speakerNames = names
+        recording.speakerSuggestions = [:]
+        recording.diarized = true
+        recording.speakerNamesUpdatedAt = .now
+        recording.transcript = recording.plainTranscript
+        try? context.save()
+    }
+
+    private func revise(_ recording: Recording, in context: ModelContext, applyNames: Bool) async throws {
+        // Si rivede sempre partendo dalla trascrizione automatica originale.
+        let base = recording.revisedByClaude ? recording.originalSegments : recording.segments
+        guard !base.isEmpty else { return }
+        let id = recording.id
+        say(recording, "L'AI migliora la trascrizione…")
+        let entries = glossary(context)
+        let result = try await ClaudeService.revise(
+            segments: base,
+            speakers: recording.diarized ? recording.speakerOrder : [],
+            speakerNames: recording.speakerNames,
+            title: recording.title, notes: recording.notes,
+            glossaryTerms: Glossary.termsForClaude(entries)
+        ) { [weak self] message in
+            self?.status[id] = message
+        }
+        if !recording.revisedByClaude { recording.originalSegments = base }
+        var revised = Glossary.apply(entries, to: result.segments)
+        // Voci non separate: l'AI può averle distinte lei. Vale solo se le persone sono almeno due.
+        if !recording.diarized {
+            if Set(revised.compactMap(\.speaker)).count >= 2 {
+                recording.diarized = true
+            } else {
+                revised = revised.map { var s = $0; s.speaker = nil; return s }
+            }
+        }
+        recording.segments = revised
+        recording.speakerNamesUpdatedAt = .now
+        // Nomi o ruoli proposti: applicati subito a chi non ha già un nome (restano modificabili).
+        let order = Set(recording.speakerOrder)
+        let proposals = result.suggestions.filter { id, _ in
+            order.contains(id) && (recording.speakerNames[id] ?? "").isEmpty
+        }
+        if applyNames {
+            var names = recording.speakerNames
+            for (speaker, name) in proposals { names[speaker] = name }
+            recording.speakerNames = names
+            recording.speakerSuggestions = [:]
+        } else {
+            recording.speakerSuggestions = proposals
+        }
+        if recording.hasDefaultTitle, let title = result.title, !title.isEmpty {
+            recording.title = title
+        }
+        recording.revisedByClaude = true
+        recording.transcript = recording.plainTranscript
+        try? context.save()
+    }
+
+    private func diarizeQuietly(_ recording: Recording, in context: ModelContext) async {
+        do { try await diarize(recording, in: context) } catch { errors[recording.id] = "Parlanti: \(error.localizedDescription)" }
+    }
+
+    private func improveQuietly(_ recording: Recording, in context: ModelContext, applyNames: Bool) async {
+        do { try await revise(recording, in: context, applyNames: applyNames) } catch { errors[recording.id] = "Miglioramento AI: \(error.localizedDescription)" }
+    }
+
+    /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile, con l'AI avanzata.
+    private func summaryQuietly(_ recording: Recording, in context: ModelContext) async {
+        let template = SummaryTemplate.byID("sintesi")
+        let id = recording.id
+        say(recording, "Preparo la sintesi…")
+        do {
+            if SummaryService.availabilityMessage == nil, let transcript = recording.transcript {
+                let text = try await SummaryService.summarize(transcript: transcript, template: template) { [weak self] message in
+                    self?.status[id] = message
+                }
+                let summary = Summary(templateID: template.id, templateName: template.name, text: text)
+                summary.recording = recording
+                context.insert(summary)
+            } else if ClaudeService.isConfigured {
+                let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript, template: template)
+                let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
+                summary.recording = recording
+                context.insert(summary)
+            }
+            try? context.save()
+        } catch {
+            errors[id] = "Sintesi: \(error.localizedDescription)"
+        }
+    }
+
+    /// Titolo dal contenuto, sul dispositivo (gratis). Se non riesce, resta quello con data e ora.
+    private func titleQuietly(_ recording: Recording, in context: ModelContext) async {
+        guard SummaryService.availabilityMessage == nil else { return }
+        let source = recording.sortedSummaries.first?.text ?? recording.transcript ?? ""
+        guard source.count > 40 else { return }
+        if let title = try? await SummaryService.title(for: source), title.count >= 3, recording.hasDefaultTitle {
+            recording.title = title
+            try? context.save()
+        }
+    }
+}

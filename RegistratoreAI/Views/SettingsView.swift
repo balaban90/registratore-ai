@@ -6,7 +6,10 @@ struct SettingsView: View {
     @AppStorage(ClaudeService.summaryModelKey) private var summaryModelRaw = ClaudeModel.sonnet.rawValue
     @AppStorage(ClaudeService.chatModelKey) private var chatModelRaw = ClaudeModel.haiku.rawValue
     @AppStorage(TranscriptionLanguage.defaultsKey) private var languageRaw = TranscriptionLanguage.italian.rawValue
-    @AppStorage(TranscriptionEngine.defaultsKey) private var engineRaw = TranscriptionEngine.fast.rawValue
+    @AppStorage(TranscriptionEngine.defaultsKey) private var engineRaw = TranscriptionEngine.automatic.rawValue
+    @AppStorage(Pipeline.autoImproveKey) private var autoImprove = true
+    @AppStorage(Pipeline.autoSummaryKey) private var autoSummary = true
+    @ObservedObject private var whisper = WhisperModel.shared
 
     @State private var keyInput = ""
     @State private var hasKey = ClaudeService.isConfigured
@@ -23,15 +26,10 @@ struct SettingsView: View {
                             Text(language.label).tag(language.rawValue)
                         }
                     }
-                    Picker("Motore", selection: $engineRaw) {
-                        ForEach(TranscriptionEngine.allCases) { engine in
-                            Text(engine.label).tag(engine.rawValue)
-                        }
-                    }
                 } header: {
                     Text("Trascrizione")
                 } footer: {
-                    Text("Preciso riconosce meglio il parlato colloquiale ma è più lento e richiede un download di circa 630 MB la prima volta. Entrambi i motori lavorano sul dispositivo. Per applicare le modifiche a una registrazione esistente: ⋯ > Rifai la trascrizione.")
+                    Text("Lingua parlata nelle registrazioni.")
                 }
 
                 Section {
@@ -81,6 +79,25 @@ struct SettingsView: View {
                     Text("Modello AI")
                 } footer: {
                     Text("Consigliati: Bilanciato per le elaborazioni, Economico per le domande. Avanzato offre la massima qualità a un costo maggiore.")
+                }
+
+                Section {
+                    Picker("Motore di trascrizione", selection: $engineRaw) {
+                        ForEach(TranscriptionEngine.allCases) { engine in
+                            Text(engine.label).tag(engine.rawValue)
+                        }
+                    }
+                    if let progress = whisper.downloadProgress {
+                        LabeledContent("Motore Preciso", value: "Download \(Int(progress * 100))%")
+                    } else {
+                        LabeledContent("Motore Preciso", value: WhisperModel.isReady ? "Pronto" : "Non scaricato")
+                    }
+                    Toggle("Migliora con l'AI", isOn: $autoImprove)
+                    Toggle("Sintesi automatica", isOn: $autoSummary)
+                } header: {
+                    Text("Avanzate")
+                } footer: {
+                    Text("Automatico usa il motore Preciso quando è scaricato (circa 630 MB, solo con Wi-Fi), altrimenti Veloce. \"Migliora con l'AI\" corregge testo e parlanti dopo ogni trascrizione, se è attiva l'AI avanzata. \"Sintesi automatica\" crea la sintesi usata come anteprima nell'elenco.")
                 }
 
                 Section {

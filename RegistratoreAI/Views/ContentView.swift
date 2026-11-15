@@ -8,13 +8,6 @@ struct RecordingSection: Identifiable {
     let items: [Recording]
 }
 
-enum RecordingFilter: String, CaseIterable, Identifiable {
-    case all = "Tutte"
-    case summarized = "Con elaborazioni"
-    case pending = "Da trascrivere"
-    var id: String { rawValue }
-}
-
 struct ContentView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Recording.createdAt, order: .reverse) private var recordings: [Recording]
@@ -25,21 +18,18 @@ struct ContentView: View {
     @State private var importError: String?
     @State private var path: [Recording] = []
     @State private var search = ""
-    @State private var filter: RecordingFilter = .all
+    @ObservedObject private var pipeline = Pipeline.shared
     @State private var toDelete: Recording?
 
     private var filtered: [Recording] {
-        recordings.filter { r in
-            switch filter {
-            case .all: break
-            case .summarized: if r.summaries.isEmpty { return false }
-            case .pending: if r.transcript != nil { return false }
-            }
-            let q = search.trimmingCharacters(in: .whitespaces)
-            guard !q.isEmpty else { return true }
-            return r.title.localizedCaseInsensitiveContains(q)
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return recordings }
+        return recordings.filter { r in
+            r.title.localizedCaseInsensitiveContains(q)
                 || (r.transcript ?? "").localizedCaseInsensitiveContains(q)
                 || r.notes.localizedCaseInsensitiveContains(q)
+                || r.summaries.contains { $0.text.localizedCaseInsensitiveContains(q) }
+                || r.speakerNames.values.contains { $0.localizedCaseInsensitiveContains(q) }
         }
     }
 
@@ -70,13 +60,6 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section {
-                    filterChips
-                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-
                 if recordings.isEmpty {
                     emptyState
                         .listRowBackground(Color.clear)
@@ -131,7 +114,11 @@ struct ContentView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Registrazioni")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $search, prompt: "Cerca anche nelle trascrizioni")
+            .searchable(text: $search, prompt: "Cerca per argomento, persona o parola")
+            .task {
+                Pipeline.shared.resumePending(recordings, in: context)
+                if TranscriptionEngine.current == .automatic { WhisperModel.shared.downloadIfAppropriate() }
+            }
             .navigationDestination(for: Recording.self) { recording in
                 RecordingDetailView(recording: recording)
             }
@@ -181,28 +168,6 @@ struct ContentView: View {
     }
 
     // MARK: - Pezzi
-
-    private var filterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(RecordingFilter.allCases) { f in
-                    Button {
-                        withAnimation(.snappy) { filter = f }
-                    } label: {
-                        Text(f.rawValue)
-                            .font(.subheadline.weight(filter == f ? .semibold : .medium))
-                            .padding(.horizontal, 14)
-                            .frame(height: 34)
-                            .background(filter == f ? Theme.accent : Color(.secondarySystemGroupedBackground), in: Capsule())
-                            .foregroundStyle(filter == f ? Color.white : Color.primary)
-                            .shadow(color: .black.opacity(filter == f ? 0 : 0.05), radius: 1, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 6)
-        }
-    }
 
     private var emptyState: some View {
         VStack(spacing: 14) {
@@ -255,7 +220,8 @@ struct ContentView: View {
         )
         context.insert(recording)
         try? context.save()
-        path = [recording] // apre subito il dettaglio, che avvia la trascrizione
+        // Resta nell'elenco: la registrazione si lavora da sola e l'anteprima compare quando è pronta.
+        pipeline.process(recording, in: context)
     }
 
     private func delete(_ recording: Recording) {
@@ -282,7 +248,7 @@ struct ContentView: View {
             let recording = Recording(title: title, audioFileName: name, duration: duration, inputName: "File importato")
             context.insert(recording)
             try? context.save()
-            path = [recording]
+            pipeline.process(recording, in: context)
         } catch {
             importError = error.localizedDescription
         }
@@ -291,6 +257,7 @@ struct ContentView: View {
 
 struct RecordingCard: View {
     let recording: Recording
+    @ObservedObject private var pipeline = Pipeline.shared
 
     private var latestTemplateID: String? {
         recording.sortedSummaries.first?.templateID
@@ -323,19 +290,29 @@ struct RecordingCard: View {
                 Text(recording.title)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
+                if let status = pipeline.status[recording.id] {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(status).lineLimit(1)
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(Theme.accentText)
+                } else if let preview = recording.preview {
+                    Text(preview)
+                        .font(.footnote)
+                        .foregroundStyle(.primary.opacity(0.75))
+                        .lineLimit(2)
+                } else if recording.transcriptionError != nil {
+                    Text("Trascrizione non riuscita: apri per riprovare")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
                 Text(meta)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-
-            if !recording.summaries.isEmpty {
-                StatusPill(text: "Elaborato", background: Color(red: 0.953, green: 0.91, blue: 1.0), foreground: Color(red: 0.42, green: 0.129, blue: 0.659))
-            } else if recording.transcript != nil {
-                StatusPill(text: "Trascritto", background: Color(red: 0.878, green: 0.929, blue: 1.0), foreground: Color(red: 0.043, green: 0.31, blue: 0.69))
-            } else {
-                StatusPill(text: "Da trascrivere", background: Color(red: 1.0, green: 0.922, blue: 0.839), foreground: Color(red: 0.541, green: 0.231, blue: 0.0))
-            }
         }
         .padding(14)
         .card()

@@ -206,6 +206,28 @@ final class Recording {
         return blocks.joined(separator: "\n")
     }
 
+    /// Il titolo è ancora quello automatico ("Registrazione del …") e può essere sostituito da uno proposto.
+    var hasDefaultTitle: Bool { title.hasPrefix("Registrazione del") || title.isEmpty }
+
+    /// Anteprima per l'elenco: la frase "di cosa si parla" della Sintesi veloce.
+    var preview: String? {
+        guard let summary = summaries.filter({ $0.templateID == "sintesi" }).sorted(by: { $0.createdAt > $1.createdAt }).first
+                ?? sortedSummaries.first else { return nil }
+        for raw in summary.text.components(separatedBy: "\n") {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") || line.hasSuffix(":") || line.hasSuffix(":**") { continue }  // titoli di sezione
+            line = line.replacingOccurrences(of: "**", with: "")
+            while let c = line.first, "#-*•0123456789.) ".contains(c) { line.removeFirst() }
+            if let colon = line.firstIndex(of: ":"), line.distance(from: line.startIndex, to: colon) < 25 {
+                let rest = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if rest.isEmpty { continue }
+                line = rest
+            }
+            if line.count > 12 { return line }
+        }
+        return nil
+    }
+
     var sortedSummaries: [Summary] {
         summaries.sorted { $0.createdAt > $1.createdAt }
     }

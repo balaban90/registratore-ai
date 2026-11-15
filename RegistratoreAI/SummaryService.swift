@@ -72,6 +72,15 @@ enum SummaryService {
         return try await ask(instructions: instructions, prompt: "\(intro)\n\n\(material)")
     }
 
+    /// Titolo breve (3-7 parole) per riconoscere la registrazione nell'elenco. Gratis, sul dispositivo.
+    static func title(for text: String) async throws -> String {
+        if let message = availabilityMessage { throw SummaryFailure.unavailable(message) }
+        let instructions = "Scrivi solo un titolo in italiano di 3-7 parole che dica di cosa parla il testo. Niente virgolette, niente punto finale."
+        let raw = try await ask(instructions: instructions, prompt: String(text.prefix(3_000)))
+        let firstLine = raw.components(separatedBy: "\n").first ?? raw
+        return String(firstLine.trimmingCharacters(in: CharacterSet(charactersIn: " \"«»*#.")).prefix(80))
+    }
+
     private static func extractNotes(from chunk: String, part: Int, of total: Int) async throws -> String {
         let instructions = """
         Estrai da una parte di trascrizione gli appunti essenziali, in italiano, come elenco puntato.

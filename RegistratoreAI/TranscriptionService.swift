@@ -49,6 +49,8 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
 
 /// Motore di trascrizione. Entrambi lavorano sul dispositivo: l'audio non esce mai dall'iPhone.
 enum TranscriptionEngine: String, CaseIterable, Identifiable {
+    /// Preciso quando il suo modello è scaricato, altrimenti Veloce (e intanto scarica il modello con il Wi-Fi).
+    case automatic
     /// Riconoscimento vocale di Apple: veloce, nessun download aggiuntivo.
     case fast
     /// Whisper Large v3 Turbo (WhisperKit): più preciso sul parlato colloquiale, più lento.
@@ -58,6 +60,7 @@ enum TranscriptionEngine: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .automatic: return "Automatico"
         case .fast: return "Veloce"
         case .accurate: return "Preciso"
         }
@@ -66,7 +69,13 @@ enum TranscriptionEngine: String, CaseIterable, Identifiable {
     static let defaultsKey = "transcriptionEngine"
 
     static var current: TranscriptionEngine {
-        TranscriptionEngine(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .fast
+        TranscriptionEngine(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .automatic
+    }
+
+    /// Motore effettivo da usare adesso.
+    var resolved: TranscriptionEngine {
+        guard self == .automatic else { return self }
+        return WhisperModel.isReady ? .accurate : .fast
     }
 }
 
@@ -75,16 +84,14 @@ enum TranscriptionService {
 
     static func transcribe(url: URL, engine: TranscriptionEngine = .current,
                            progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
-        switch engine {
-        case .fast: return try await transcribeWithApple(url: url, progress: progress)
+        switch engine.resolved {
         case .accurate: return try await transcribeWithWhisper(url: url, progress: progress)
+        default: return try await transcribeWithApple(url: url, progress: progress)
         }
     }
 
     // MARK: - Whisper
 
-    /// Variante compressa di Whisper Large v3 Turbo (circa 630 MB), adatta all'iPhone.
-    static let whisperModel = "openai_whisper-large-v3-v20240930_turbo_632MB"
     private static var whisper: WhisperKit?
 
     private static func transcribeWithWhisper(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
@@ -92,8 +99,17 @@ enum TranscriptionService {
         if let whisper {
             pipe = whisper
         } else {
-            await progress("Preparo il motore Preciso (la prima volta scarica circa 630 MB)…")
-            let config = WhisperKitConfig(model: whisperModel)
+            let config: WhisperKitConfig
+            if WhisperModel.isReady {
+                await progress("Preparo il motore Preciso…")
+                config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
+                                          modelFolder: WhisperModel.folder.path, tokenizerFolder: WhisperModel.base,
+                                          download: false)
+            } else {
+                await progress("Scarico il motore Preciso (circa 630 MB, solo la prima volta)…")
+                config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
+                                          modelRepo: WhisperModel.repo, tokenizerFolder: WhisperModel.base)
+            }
             pipe = try await WhisperKit(config)
             whisper = pipe
         }

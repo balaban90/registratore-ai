@@ -26,13 +26,11 @@ struct RecordingDetailView: View {
     @Query(sort: \CustomTemplate.createdAt) private var customTemplates: [CustomTemplate]
     @Query(sort: \GlossaryEntry.createdAt) private var glossary: [GlossaryEntry]
     @Query private var voiceProfiles: [VoiceProfile]
-    @State private var isDiarizing = false
+    @ObservedObject private var pipeline = Pipeline.shared
     @State private var editingSpeaker: SpeakerEditTarget?
 
     @State private var tab: DetailTab = .summaries
-    @State private var isTranscribing = false
     @State private var isSummarizing = false
-    @State private var isRevising = false
     @State private var progressText = ""
     @State private var errorText: String?
     @State private var shareItem: ShareItem?
@@ -41,14 +39,14 @@ struct RecordingDetailView: View {
     @State private var showAsk = false
     @State private var claudeReady = ClaudeService.isConfigured
     @State private var showOriginal = false
-    @State private var revisionCost: Double?
     @State private var engineChoice: EngineChoice = .automatic
 
     private var templates: [SummaryTemplate] {
         SummaryTemplate.available(custom: customTemplates)
     }
 
-    private var busy: Bool { isTranscribing || isSummarizing || isRevising || isDiarizing }
+    private var busy: Bool { isSummarizing || pipeline.isRunning(recording) }
+    private var isTranscribing: Bool { pipeline.isRunning(recording) && recording.transcript == nil }
 
     private var shownSegments: [TranscriptSegment] {
         showOriginal && recording.revisedByClaude ? recording.originalSegments : recording.segments
@@ -124,7 +122,7 @@ struct RecordingDetailView: View {
             player.load(url: recording.audioURL)
             if !autoStarted && recording.transcript == nil && recording.transcriptionError == nil {
                 autoStarted = true
-                transcribe()
+                pipeline.process(recording, in: context)
             }
         }
         .onDisappear {
@@ -159,13 +157,13 @@ struct RecordingDetailView: View {
         if busy {
             HStack(spacing: 12) {
                 ProgressView()
-                Text(progressText).font(.callout)
+                Text(pipeline.status[recording.id] ?? progressText).font(.callout)
                 Spacer()
             }
             .padding(14)
             .card(cornerRadius: 16)
         }
-        if let errorText {
+        if let errorText = errorText ?? pipeline.errors[recording.id] {
             Label(errorText, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout)
                 .foregroundStyle(.red)
@@ -319,22 +317,25 @@ struct RecordingDetailView: View {
             needsTranscript
         } else {
             HStack {
-                if recording.revisedByClaude {
-                    Picker("Versione", selection: $showOriginal) {
-                        Text("Migliorata").tag(false)
-                        Text("Originale").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 220)
+                if recording.revisedByClaude && !showOriginal {
+                    Label("Migliorata con l'AI", systemImage: "wand.and.stars")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 transcriptMenu
             }
 
-            if let revisionCost {
-                Text("Trascrizione migliorata · \(formatUSD(revisionCost))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if showOriginal && recording.revisedByClaude {
+                HStack(spacing: 10) {
+                    Label("Trascrizione originale, prima del miglioramento AI", systemImage: "doc.plaintext")
+                        .font(.footnote)
+                    Spacer(minLength: 4)
+                    Button("Chiudi") { showOriginal = false }
+                        .font(.footnote.weight(.semibold))
+                }
+                .padding(12)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             if !recording.highlights.isEmpty {
@@ -536,34 +537,29 @@ struct RecordingDetailView: View {
 
     private var transcriptMenu: some View {
         Menu {
-            Button {
-                separateSpeakers()
-            } label: {
-                Label(recording.diarized ? "Separa di nuovo i parlanti" : "Separa i parlanti", systemImage: "person.2.wave.2")
-            }
-            if claudeReady {
-                Button {
-                    reviseWithClaude()
-                } label: {
-                    Label(recording.revisedByClaude ? "Migliora di nuovo con l'AI" : "Migliora con l'AI: testo e parlanti (≈1 cent/ora)", systemImage: "wand.and.stars")
-                }
-            }
-            Button {
-                applyGlossary()
-            } label: {
-                Label("Applica il glossario", systemImage: "character.book.closed")
-            }
             if recording.revisedByClaude {
-                Button(role: .destructive) {
-                    restoreOriginal()
+                Button {
+                    showOriginal.toggle()
                 } label: {
-                    Label("Ripristina l'originale", systemImage: "arrow.uturn.backward")
+                    Label(showOriginal ? "Mostra la versione migliorata" : "Mostra l'originale", systemImage: "doc.plaintext")
                 }
             }
-            Menu {
-                ForEach(TranscriptionEngine.allCases) { engine in
-                    Button(engine.label) { transcribe(engine: engine) }
+            if claudeReady && !recording.revisedByClaude {
+                Button {
+                    pipeline.improve(recording, in: context)
+                } label: {
+                    Label("Migliora con l'AI", systemImage: "wand.and.stars")
                 }
+            }
+            if !recording.diarized {
+                Button {
+                    pipeline.separateSpeakers(recording, in: context)
+                } label: {
+                    Label("Riconosci chi parla", systemImage: "person.2.wave.2")
+                }
+            }
+            Button {
+                transcribe()
             } label: {
                 Label("Rifai la trascrizione", systemImage: "arrow.clockwise")
             }
@@ -639,74 +635,11 @@ struct RecordingDetailView: View {
         shareItem = ShareItem(items: [url])
     }
 
-    private func transcribe(engine: TranscriptionEngine = .current) {
-        guard !isTranscribing else { return }
-        isTranscribing = true
+    /// Rifà tutto da capo (trascrizione, parlanti, miglioramento); le elaborazioni restano.
+    private func transcribe() {
         errorText = nil
-        progressText = "Avvio…"
-        let url = recording.audioURL
-        Task {
-            do {
-                let segments = try await TranscriptionService.transcribe(url: url, engine: engine) { message in
-                    progressText = message
-                }
-                recording.segments = Glossary.apply(glossary, to: segments)
-                recording.originalSegments = []
-                recording.revisedByClaude = false
-                showOriginal = false
-                revisionCost = nil
-                recording.diarized = false
-                recording.speakerNames = [:]
-                recording.speakerSuggestions = [:]
-                recording.transcript = recording.plainTranscript
-                recording.transcriptionError = nil
-                try? context.save()
-                isTranscribing = false
-                if DiarizationService.isEnabled {
-                    separateSpeakers()
-                }
-            } catch {
-                recording.transcriptionError = error.localizedDescription
-                errorText = "Trascrizione non riuscita: \(error.localizedDescription)"
-                isTranscribing = false
-            }
-        }
-    }
-
-    private func separateSpeakers() {
-        guard !isDiarizing, !recording.segments.isEmpty else { return }
-        isDiarizing = true
-        errorText = nil
-        progressText = "Separo le voci…"
-        let url = recording.audioURL
-        let known = voiceProfiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
-        let profileNames = Dictionary(uniqueKeysWithValues: voiceProfiles.map { ($0.speakerKey, $0.name) })
-        Task {
-            do {
-                let turns = try await DiarizationService.diarize(url: url, known: known) { message in
-                    progressText = message
-                }
-                // Le frasi divise vengono ricostruite dalle parole originali: si riapplica il glossario.
-                recording.segments = Glossary.apply(glossary, to: DiarizationService.assign(turns, to: recording.segments))
-                if recording.revisedByClaude {
-                    recording.originalSegments = Glossary.apply(glossary, to: DiarizationService.assign(turns, to: recording.originalSegments))
-                }
-                recording.speakerSuggestions = [:]
-                // I parlanti riconosciuti dai profili vocali prendono subito il nome.
-                var names: [String: String] = [:]
-                for id in recording.speakerOrder {
-                    if let n = profileNames[id] { names[id] = n }
-                }
-                recording.speakerNames = names
-                recording.diarized = true
-                recording.speakerNamesUpdatedAt = .now
-                recording.transcript = recording.plainTranscript
-                try? context.save()
-            } catch {
-                errorText = "Separazione delle voci non riuscita: \(error.localizedDescription)"
-            }
-            isDiarizing = false
-        }
+        showOriginal = false
+        pipeline.process(recording, in: context, retranscribe: true)
     }
 
     private func reassign(_ segmentId: UUID, to speaker: String) {
@@ -787,75 +720,6 @@ struct RecordingDetailView: View {
                 errorText = error.localizedDescription
             }
             isSummarizing = false
-        }
-    }
-
-    private func applyGlossary() {
-        recording.segments = Glossary.apply(glossary, to: recording.segments)
-        recording.transcript = recording.plainTranscript
-        try? context.save()
-    }
-
-    private func restoreOriginal() {
-        let original = recording.originalSegments
-        guard !original.isEmpty else { return }
-        recording.segments = original
-        recording.originalSegments = []
-        recording.revisedByClaude = false
-        recording.transcript = recording.plainTranscript
-        showOriginal = false
-        try? context.save()
-    }
-
-    private func reviseWithClaude() {
-        guard !isRevising else { return }
-        // Si rivede sempre partendo dalla trascrizione automatica originale.
-        let base = recording.revisedByClaude ? recording.originalSegments : recording.segments
-        guard !base.isEmpty else { return }
-        isRevising = true
-        errorText = nil
-        progressText = "L'AI migliora la trascrizione…"
-        let title = recording.title
-        let notes = recording.notes
-        let terms = Glossary.termsForClaude(glossary)
-        let speakers = recording.diarized ? recording.speakerOrder : []
-        let names = recording.speakerNames
-        Task {
-            do {
-                let result = try await ClaudeService.revise(segments: base, speakers: speakers, speakerNames: names,
-                                                            title: title, notes: notes, glossaryTerms: terms) { message in
-                    progressText = message
-                }
-                if !recording.revisedByClaude {
-                    recording.originalSegments = base
-                }
-                var revised = Glossary.apply(glossary, to: result.segments)
-                // Voci non separate: l'AI può averle distinte lei. Vale solo se le persone sono almeno due.
-                if !recording.diarized {
-                    let found = Set(revised.compactMap(\.speaker))
-                    if found.count >= 2 {
-                        recording.diarized = true
-                    } else {
-                        revised = revised.map { var s = $0; s.speaker = nil; return s }
-                    }
-                }
-                let speakersChanged = zip(base, revised).contains { $0.speaker != $1.speaker } || base.count != revised.count
-                recording.segments = revised
-                if speakersChanged { recording.speakerNamesUpdatedAt = .now }
-                // Nomi proposti dall'AI: solo per chi non ha già un nome.
-                let order = Set(recording.speakerOrder)
-                recording.speakerSuggestions = result.suggestions.filter { id, _ in
-                    order.contains(id) && (recording.speakerNames[id] ?? "").isEmpty
-                }
-                recording.revisedByClaude = true
-                recording.transcript = recording.plainTranscript
-                showOriginal = false
-                try? context.save()
-                revisionCost = result.cost
-            } catch {
-                errorText = "Miglioramento non riuscito: \(error.localizedDescription)"
-            }
-            isRevising = false
         }
     }
 

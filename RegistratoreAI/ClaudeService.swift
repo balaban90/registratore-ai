@@ -268,6 +268,8 @@ enum ClaudeService {
         var segments: [TranscriptSegment]
         /// Nomi o ruoli proposti dall'AI per i parlanti (id → nome), da confermare.
         var suggestions: [String: String]
+        /// Titolo breve proposto dall'AI per la registrazione.
+        var title: String?
         var cost: Double
     }
 
@@ -340,6 +342,8 @@ enum ClaudeService {
         - In fondo, solo se dal contenuto si capisce chiaramente il nome o il ruolo di qualcuno, aggiungi una riga:
           #PARLANTI P1=nome o ruolo; P2=nome o ruolo
           (es. "Marco", "Docente", "Cliente"). Non inventare: se non è chiaro, ometti quella persona.
+        - Sempre in fondo, una riga con un titolo di 3-7 parole che descriva di cosa si parla:
+          #TITOLO titolo
         - Nessun altro testo prima o dopo.
 
         Registrazione: "\(title)"
@@ -365,6 +369,7 @@ enum ClaudeService {
 
         var replacements: [Int: [TranscriptSegment]] = [:]
         var suggestions: [String: String] = [:]
+        var proposedTitle: String?
         var totalCost = 0.0
 
         func resolve(_ label: String, fallback: String?) -> String? {
@@ -391,6 +396,12 @@ enum ClaudeService {
             var pieces: [Int: [(label: String, text: String)]] = [:]
             for raw in reply.text.components(separatedBy: "\n") {
                 let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.uppercased().hasPrefix("#TITOLO") {
+                    let t = line.dropFirst("#TITOLO".count)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: " :\"«»*"))
+                    if proposedTitle == nil, !t.isEmpty { proposedTitle = String(t.prefix(80)) }
+                    continue
+                }
                 if line.uppercased().hasPrefix("#PARLANTI") {
                     let list = line.dropFirst("#PARLANTI".count)
                     for pair in list.split(separator: ";") {
@@ -452,7 +463,7 @@ enum ClaudeService {
         for (i, seg) in segments.enumerated() {
             output.append(contentsOf: replacements[i] ?? [seg])
         }
-        return RevisionResult(segments: output, suggestions: suggestions, cost: totalCost)
+        return RevisionResult(segments: output, suggestions: suggestions, title: proposedTitle, cost: totalCost)
     }
 
     /// Verifica rapida della chiave con una richiesta minima.
