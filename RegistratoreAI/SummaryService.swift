@@ -9,8 +9,8 @@ enum SummaryFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable(let message): return message
-        case .tooLong: return "Il testo è troppo lungo per l'AI sul telefono. Usa l'AI avanzata."
-        case .blocked: return "L'AI sul telefono si è rifiutata di elaborare questo contenuto. Usa l'AI avanzata."
+        case .tooLong: return "Testo troppo lungo per l'AI sul dispositivo. Usa l'AI avanzata."
+        case .blocked: return "L'AI sul dispositivo non può elaborare questo contenuto. Usa l'AI avanzata."
         }
     }
 }
@@ -29,13 +29,13 @@ enum SummaryService {
         case .unavailable(let reason):
             switch reason {
             case .deviceNotEligible:
-                return "Questo iPhone non supporta Apple Intelligence. Usa l'AI avanzata."
+                return "Questo iPhone non supporta Apple Intelligence."
             case .appleIntelligenceNotEnabled:
-                return "Attiva Apple Intelligence in Impostazioni > Apple Intelligence e Siri."
+                return "Attiva Apple Intelligence in Impostazioni di iOS."
             case .modelNotReady:
-                return "L'AI sul telefono si sta ancora scaricando. Riprova tra qualche minuto."
+                return "Modello Apple Intelligence in download. Riprova tra qualche minuto."
             @unknown default:
-                return "L'AI sul telefono non è disponibile al momento."
+                return "Apple Intelligence non è disponibile al momento."
             }
         }
     }

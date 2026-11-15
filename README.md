@@ -6,7 +6,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.9)
+## Cosa fa (versione 0.10)
 
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
@@ -22,6 +22,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 - **Parole incerte evidenziate:** le parole su cui il riconoscimento era poco sicuro sono colorate, così le controlli subito.
 - **"Migliora con l'AI" in un solo passaggio economico:** corregge le parole sbagliate (soprattutto quelle incerte), rimette punteggiatura ed elenchi, sistema chi parla in base al contenuto e propone i nomi o i ruoli dei parlanti (li confermi tu con "Applica").
 - **Claude dentro l'app** (con chiave API, in Impostazioni ⚙︎): elaborazione con Claude e "Chiedi a Claude" sulla registrazione (domande, mail, comunicati). A Claude va solo il testo.
+- **Motore giusto per ogni modello:** Riunione, Verbale, Intervista e simili usano l'AI avanzata; Sintesi veloce e Appunto vocale l'AI sul dispositivo (gratis). Con "Scegli il motore" puoi cambiarlo ogni volta, e nei tuoi modelli lo imposti tu.
 - **Modelli personalizzati**: crea, modifica o duplica i modelli di elaborazione (Impostazioni > Modelli di elaborazione).
 - **Invia all'app Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
 - Esporta in PDF, RTF (si apre con Word e Pages), testo o audio.

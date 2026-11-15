@@ -234,15 +234,24 @@ final class CustomTemplate {
     var icon: String = "star"
     var instructions: String = ""
     var createdAt: Date = Date.now
+    /// Motore consigliato ("cloud" o "device").
+    var engineRaw: String = SummaryEngine.cloud.rawValue
 
-    init(name: String, icon: String = "star", instructions: String) {
+    init(name: String, icon: String = "star", instructions: String, engine: SummaryEngine = .cloud) {
         self.name = name
         self.icon = icon
         self.instructions = instructions
+        self.engineRaw = engine.rawValue
+    }
+
+    var engine: SummaryEngine {
+        get { SummaryEngine(rawValue: engineRaw) ?? .cloud }
+        set { engineRaw = newValue.rawValue }
     }
 
     var asTemplate: SummaryTemplate {
-        SummaryTemplate(id: "custom-\(id.uuidString)", name: name, icon: icon, instructions: instructions, isCustom: true)
+        SummaryTemplate(id: "custom-\(id.uuidString)", name: name, icon: icon, instructions: instructions,
+                        isCustom: true, engine: engine)
     }
 }
 

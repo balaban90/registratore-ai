@@ -1,11 +1,30 @@
 import Foundation
 
+/// Dove viene fatta un'elaborazione.
+enum SummaryEngine: String, CaseIterable, Identifiable {
+    /// AI online con chiave API: più precisa su chi dice cosa, impegni e scadenze.
+    case cloud
+    /// Apple Intelligence sul dispositivo: gratuita e offline, adatta a sintesi semplici.
+    case device
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .cloud: return "AI avanzata"
+        case .device: return "Sul dispositivo"
+        }
+    }
+}
+
 struct SummaryTemplate: Identifiable, Hashable {
     let id: String
     let name: String
     let icon: String
     let instructions: String
     var isCustom: Bool = false
+    /// Motore consigliato per questo modello.
+    var engine: SummaryEngine = .cloud
 
     /// Modelli predefiniti + quelli creati dall'utente.
     static func available(custom: [CustomTemplate]) -> [SummaryTemplate] {
@@ -34,7 +53,8 @@ struct SummaryTemplate: Identifiable, Hashable {
             1. In una frase: di cosa si parla
             2. I 5 punti più importanti (elenco puntato)
             3. Cose da fare o da ricordare, se ce ne sono
-            """
+            """,
+            engine: .device
         ),
         SummaryTemplate(
             id: "riunione",
@@ -137,7 +157,8 @@ struct SummaryTemplate: Identifiable, Hashable {
             2. Punti chiave (elenco puntato)
             3. Idee o promemoria
             4. Cose da fare
-            """
+            """,
+            engine: .device
         )
     ]
 

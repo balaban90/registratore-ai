@@ -17,7 +17,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Lingua parlata", selection: $languageRaw) {
+                    Picker("Lingua", selection: $languageRaw) {
                         ForEach(TranscriptionLanguage.allCases) { language in
                             Text(language.label).tag(language.rawValue)
                         }
@@ -25,25 +25,25 @@ struct SettingsView: View {
                 } header: {
                     Text("Trascrizione")
                 } footer: {
-                    Text("La lingua in cui si parla nelle registrazioni. Le elaborazioni sono sempre in italiano. Per ritrascrivere una registrazione già fatta: menu ⋯ > Rifai la trascrizione.")
+                    Text("Lingua parlata nelle registrazioni. Per applicarla a una registrazione esistente: ⋯ > Rifai la trascrizione.")
                 }
 
                 Section {
                     if hasKey {
-                        Label("Chiave API salvata", systemImage: "checkmark.seal.fill")
+                        Label("Chiave API attiva", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
-                        Button("Verifica la chiave") { testSaved() }
+                        Button("Verifica") { testSaved() }
                             .disabled(testing)
-                        Button("Rimuovi la chiave", role: .destructive) {
+                        Button("Rimuovi chiave", role: .destructive) {
                             Keychain.delete(ClaudeService.keychainKey)
                             hasKey = false
                             testResult = nil
                         }
                     } else {
-                        SecureField("sk-ant-…", text: $keyInput)
+                        SecureField("Chiave API", text: $keyInput)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        Button("Salva e verifica") { saveAndTest() }
+                        Button("Salva") { saveAndTest() }
                             .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty || testing)
                     }
                     if testing {
@@ -55,35 +55,35 @@ struct SettingsView: View {
                             .foregroundStyle(testOK ? .green : .red)
                     }
                 } header: {
-                    Text("AI avanzata (online)")
+                    Text("AI avanzata")
                 } footer: {
-                    Text("Incolla la chiave API del tuo account del servizio AI (Settings > API keys). Resta salvata solo in questo iPhone, nel Portachiavi. All'AI viene inviato solo il testo della trascrizione, mai l'audio.")
+                    Text("La chiave è salvata nel Portachiavi di questo iPhone. Viene inviato solo il testo della trascrizione, mai l'audio.")
                 }
 
                 Section {
-                    Picker("Per le elaborazioni", selection: $summaryModelRaw) {
+                    Picker("Elaborazioni", selection: $summaryModelRaw) {
                         ForEach(ClaudeModel.allCases) { model in
                             Text(model.label).tag(model.rawValue)
                         }
                     }
-                    Picker("Per le domande", selection: $chatModelRaw) {
+                    Picker("Domande", selection: $chatModelRaw) {
                         ForEach(ClaudeModel.allCases) { model in
                             Text(model.label).tag(model.rawValue)
                         }
                     }
                 } header: {
-                    Text("Qualità dell'AI avanzata")
+                    Text("Modello AI")
                 } footer: {
-                    Text("Consigliato: Equilibrato per le elaborazioni, Economico per le domande (costa circa venti volte meno). Per risparmiare, la trascrizione resta in memoria per 5 minuti: elaborazioni e domande fatte di seguito sulla stessa registrazione costano molto meno.")
+                    Text("Consigliati: Bilanciato per le elaborazioni, Economico per le domande. Avanzato offre la massima qualità a un costo maggiore.")
                 }
 
                 Section {
                     LabeledContent("Spesa stimata", value: formatUSD(UsageTracker.monthTotal))
                     LabeledContent("Richieste", value: "\(UsageTracker.monthRequests)")
                 } header: {
-                    Text("Questo mese")
+                    Text("Consumo del mese")
                 } footer: {
-                    Text("Stima calcolata dall'app. Il saldo esatto è nel tuo account del servizio AI, nelle sezioni Usage e Billing.")
+                    Text("Stima calcolata dall'app. Il saldo effettivo è nel tuo account del provider AI.")
                 }
 
                 Section {
@@ -107,9 +107,9 @@ struct SettingsView: View {
                 Section("Informazioni") {
                     LabeledContent("Versione", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                     if let message = SummaryService.availabilityMessage {
-                        Text("AI sul telefono: \(message)").font(.footnote)
+                        Text("AI sul dispositivo: \(message)").font(.footnote)
                     } else {
-                        Label("AI sul telefono disponibile", systemImage: "iphone")
+                        Label("AI sul dispositivo disponibile", systemImage: "iphone")
                             .font(.footnote)
                     }
                 }
@@ -136,7 +136,7 @@ struct SettingsView: View {
                 hasKey = true
                 keyInput = ""
                 testOK = true
-                testResult = "Funziona: l'AI avanzata è collegata."
+                testResult = "Chiave verificata."
             } catch {
                 testOK = false
                 testResult = error.localizedDescription
@@ -153,7 +153,7 @@ struct SettingsView: View {
             do {
                 try await ClaudeService.test(key: key)
                 testOK = true
-                testResult = "Funziona: l'AI avanzata è collegata."
+                testResult = "Chiave verificata."
             } catch {
                 testOK = false
                 testResult = error.localizedDescription
@@ -255,6 +255,7 @@ struct TemplateEditorView: View {
     @State private var name = ""
     @State private var icon = "star"
     @State private var instructions = ""
+    @State private var engine: SummaryEngine = .cloud
 
     var body: some View {
         NavigationStack {
@@ -285,6 +286,13 @@ struct TemplateEditorView: View {
                 } footer: {
                     Text("Esempio: \"Riassumi una riunione di condominio. Sezioni: 1. Presenti 2. Problemi segnalati 3. Spese approvate con importi 4. Lavori decisi e tempi 5. Cose da fare\". Le regole comuni (italiano, niente invenzioni) vengono aggiunte da sole.")
                 }
+                Section {
+                    Picker("Motore", selection: $engine) {
+                        ForEach(SummaryEngine.allCases) { Text($0.label).tag($0) }
+                    }
+                } footer: {
+                    Text("AI avanzata per riunioni e documenti con impegni e scadenze. Sul dispositivo per sintesi semplici, gratis e offline.")
+                }
             }
             .navigationTitle(template == nil ? "Nuovo modello" : "Modifica modello")
             .navigationBarTitleDisplayMode(.inline)
@@ -303,10 +311,12 @@ struct TemplateEditorView: View {
                     name = template.name
                     icon = template.icon
                     instructions = template.instructions
+                    engine = template.engine
                 } else if let startingFrom {
-                    name = "\(startingFrom.name) (mio)"
+                    name = "\(startingFrom.name) (copia)"
                     icon = startingFrom.icon
                     instructions = startingFrom.instructions
+                    engine = startingFrom.engine
                 }
             }
         }
@@ -319,8 +329,9 @@ struct TemplateEditorView: View {
             template.name = n
             template.icon = icon
             template.instructions = i
+            template.engine = engine
         } else {
-            context.insert(CustomTemplate(name: n, icon: icon, instructions: i))
+            context.insert(CustomTemplate(name: n, icon: icon, instructions: i, engine: engine))
         }
         try? context.save()
         dismiss()

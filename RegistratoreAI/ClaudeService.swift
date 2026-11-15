@@ -9,9 +9,9 @@ enum ClaudeModel: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .sonnet: return "Equilibrato (consigliato)"
+        case .sonnet: return "Bilanciato"
         case .haiku: return "Economico"
-        case .opus: return "Massima qualità (costa di più)"
+        case .opus: return "Avanzato"
         }
     }
 
@@ -68,7 +68,7 @@ enum ClaudeFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingKey:
-            return "Inserisci la chiave API dell'AI avanzata in Impostazioni."
+            return "Inserisci la chiave API in Impostazioni > AI avanzata."
         case .http(let code, let message):
             let lower = message.lowercased()
             if lower.contains("credit") || lower.contains("balance") {

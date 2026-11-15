@@ -183,21 +183,39 @@ struct RecordingDetailView: View {
         } else {
             HStack(spacing: 10) {
                 Menu {
-                    if claudeReady {
-                        Section("AI avanzata (online)") {
-                            ForEach(templates) { template in
-                                Button { summarizeWithClaude(template) } label: {
-                                    Label(template.name, systemImage: template.icon)
+                    // Ogni modello parte con il motore più adatto.
+                    Section {
+                        ForEach(templates) { template in
+                            let engine = effectiveEngine(for: template)
+                            Button { run(template, on: engine) } label: {
+                                Label {
+                                    Text(template.name)
+                                    Text(engine.label)
+                                } icon: {
+                                    Image(systemName: template.icon)
                                 }
                             }
                         }
                     }
-                    Section("AI sul telefono (offline)") {
-                        ForEach(templates) { template in
-                            Button { summarize(with: template) } label: {
-                                Label(template.name, systemImage: template.icon)
+                    Menu {
+                        if claudeReady {
+                            Section(SummaryEngine.cloud.label) {
+                                ForEach(templates) { template in
+                                    Button { run(template, on: .cloud) } label: {
+                                        Label(template.name, systemImage: template.icon)
+                                    }
+                                }
                             }
                         }
+                        Section(SummaryEngine.device.label) {
+                            ForEach(templates) { template in
+                                Button { run(template, on: .device) } label: {
+                                    Label(template.name, systemImage: template.icon)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Scegli il motore", systemImage: "cpu")
                     }
                 } label: {
                     Label("Nuova elaborazione", systemImage: "sparkles")
@@ -230,7 +248,7 @@ struct RecordingDetailView: View {
             }
 
             if !claudeReady {
-                Text("Per usare l'AI avanzata dentro l'app, inserisci la chiave API in Impostazioni.")
+                Text("Per usare l'AI avanzata, inserisci la chiave API in Impostazioni.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let message = SummaryService.availabilityMessage {
@@ -725,6 +743,20 @@ struct RecordingDetailView: View {
             summarizeWithClaude(template, replacing: summary)
         } else {
             summarize(with: template, replacing: summary)
+        }
+    }
+
+    /// Motore da usare: quello consigliato dal modello, se disponibile.
+    private func effectiveEngine(for template: SummaryTemplate) -> SummaryEngine {
+        if template.engine == .cloud && !claudeReady { return .device }
+        if template.engine == .device && SummaryService.availabilityMessage != nil && claudeReady { return .cloud }
+        return template.engine
+    }
+
+    private func run(_ template: SummaryTemplate, on engine: SummaryEngine) {
+        switch engine {
+        case .cloud: summarizeWithClaude(template)
+        case .device: summarize(with: template)
         }
     }
 
