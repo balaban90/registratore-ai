@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-/// Controlla su GitHub se c'è una versione più recente e la installa tramite SideStore.
+/// Controlla su GitHub se c'è una versione più recente e ne apre la pagina di download.
 @MainActor
 final class UpdateChecker: ObservableObject {
     static let shared = UpdateChecker()
@@ -75,21 +75,10 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
-    /// Apre SideStore per installare la nuova versione. Se SideStore non c'è, apre la pagina di GitHub.
+    /// Apre la pagina della nuova versione: il file si installa dal Mac con Sideloadly.
     func install(_ release: Release) {
-        var components = URLComponents()
-        components.scheme = "sidestore"
-        components.host = "install"
-        components.queryItems = [URLQueryItem(name: "url", value: release.ipaURL.absoluteString)]
-        guard let url = components.url else { return }
-        DiagnosticLog.info(.app, "Avvio aggiornamento a \(release.version) (\(release.build)) con SideStore")
-        UIApplication.shared.open(url) { opened in
-            guard !opened else { return }
-            Task { @MainActor in
-                DiagnosticLog.warning(.app, "SideStore non installato: apro la pagina della versione")
-                self.lastMessage = "Per aggiornare dall'app serve SideStore. Intanto puoi scaricare il file dalla pagina di GitHub."
-                UIApplication.shared.open(Self.releasesPage)
-            }
-        }
+        DiagnosticLog.info(.app, "Apertura pagina della versione \(release.version) (\(release.build))")
+        let page = URL(string: "https://github.com/\(Self.repository)/releases/tag/\(release.version)-\(release.build)") ?? Self.releasesPage
+        UIApplication.shared.open(page)
     }
 }

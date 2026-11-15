@@ -205,7 +205,7 @@ struct SettingsView: View {
                         Button {
                             updates.install(release)
                         } label: {
-                            Label("Aggiorna a \(release.version)", systemImage: "arrow.down.circle.fill")
+                            Label("Scarica la versione \(release.version)", systemImage: "arrow.down.circle.fill")
                         }
                         if !release.notes.isEmpty {
                             Text(release.notes).font(.footnote).foregroundStyle(.secondary)
@@ -227,7 +227,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Aggiornamenti")
                 } footer: {
-                    Text("Le nuove versioni si installano con SideStore, senza computer.")
+                    Text("Le nuove versioni si installano dal Mac con Sideloadly.")
                 }
 
                 Section("Informazioni") {

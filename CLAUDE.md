@@ -7,7 +7,7 @@ L'utente (Pasquale) non programma: parla in italiano semplice, niente gergo tecn
 - Nessun Mac di sviluppo: il progetto si genera con XcodeGen (`project.yml`) e si compila su GitHub Actions
   (`.github/workflows/build.yml`) a ogni push su `main`. Qui non c'è il compilatore Swift: controlla sempre
   l'esito con `gh run list` / `gh run watch` e, se fallisce, leggi gli errori con `gh run view --log-failed`.
-- Una nuova versione viene **pubblicata come Release** (ed è proposta nell'app con "Aggiorna", via SideStore)
+- Una nuova versione viene **pubblicata come Release** (l'app la segnala con "Aggiornamento disponibile"; l'utente la installa dal Mac con Sideloadly, SideStore non è usato)
   solo se aumenti `CURRENT_PROJECT_VERSION` in `project.yml`. Aumenta anche `MARKETING_VERSION`
   (0.15.0 → 0.15.1 per correzioni, 0.16.0 per novità) e aggiorna il numero nel README.
 - `NOTE-VERSIONE.md` diventa il testo della Release mostrato nell'app: 1–2 frasi in italiano semplice,

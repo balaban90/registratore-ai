@@ -72,13 +72,13 @@ struct ContentView: View {
                                 .foregroundStyle(Theme.accent)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Aggiornamento disponibile · \(release.version)").font(.subheadline.weight(.semibold))
-                                Text(release.notes.isEmpty ? "Tocca per aggiornare" : release.notes)
+                                Text(release.notes.isEmpty ? "Installala dal Mac con Sideloadly" : release.notes)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
                             Spacer()
-                            Text("Aggiorna").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                            Text("Scarica").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
                         }
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
