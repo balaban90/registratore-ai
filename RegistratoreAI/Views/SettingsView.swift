@@ -91,13 +91,19 @@ struct SettingsView: View {
                         LabeledContent("Motore Preciso", value: "Download \(Int(progress * 100))%")
                     } else {
                         LabeledContent("Motore Preciso", value: WhisperModel.isReady ? "Pronto" : "Non scaricato")
+                        if !WhisperModel.isReady && engineRaw != TranscriptionEngine.fast.rawValue {
+                            Button("Scarica ora") { whisper.downloadIfAppropriate() }
+                        }
+                    }
+                    if let error = whisper.lastError {
+                        Text(error).font(.footnote).foregroundStyle(.secondary)
                     }
                     Toggle("Migliora con l'AI", isOn: $autoImprove)
                     Toggle("Sintesi automatica", isOn: $autoSummary)
                 } header: {
                     Text("Avanzate")
                 } footer: {
-                    Text("Automatico usa il motore Preciso quando è scaricato (circa 630 MB, solo con Wi-Fi), altrimenti Veloce. \"Migliora con l'AI\" corregge testo e parlanti dopo ogni trascrizione, se è attiva l'AI avanzata. \"Sintesi automatica\" crea la sintesi usata come anteprima nell'elenco.")
+                    Text("Automatico e Preciso usano il motore Preciso quando il suo modello è scaricato (circa 630 MB, solo con Wi-Fi); fino ad allora si usa Veloce. \"Migliora con l'AI\" corregge testo e parlanti dopo ogni trascrizione, se è attiva l'AI avanzata. \"Sintesi automatica\" crea la sintesi usata come anteprima nell'elenco.")
                 }
 
                 Section {

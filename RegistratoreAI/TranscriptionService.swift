@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import Speech
 import WhisperKit
+import CoreML
 
 enum TranscriptionFailure: LocalizedError {
     case languageNotSupported
@@ -72,10 +73,13 @@ enum TranscriptionEngine: String, CaseIterable, Identifiable {
         TranscriptionEngine(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .automatic
     }
 
-    /// Motore effettivo da usare adesso.
+    /// Motore effettivo da usare adesso. La trascrizione non aspetta mai un download:
+    /// finché il modello Preciso non è completo si usa Veloce (il modello si scarica a parte).
     var resolved: TranscriptionEngine {
-        guard self == .automatic else { return self }
-        return WhisperModel.isReady ? .accurate : .fast
+        switch self {
+        case .fast: return .fast
+        case .automatic, .accurate: return WhisperModel.isReady ? .accurate : .fast
+        }
     }
 }
 
@@ -94,7 +98,11 @@ enum TranscriptionService {
                 // Modello incompleto o danneggiato: lo cancella (verrà riscaricato con il Wi-Fi)
                 // e completa comunque la trascrizione con il motore Veloce.
                 whisper = nil
-                WhisperModel.discard()
+                // Cancella il modello solo se i suoi file risultano danneggiati o mancanti.
+                let text = String(describing: error)
+                if text.contains("mlmodelc") || text.contains("weight.bin") || !WhisperModel.isReady {
+                    WhisperModel.discard()
+                }
                 await progress("Il motore Preciso non è disponibile: uso il motore Veloce…")
                 return try await transcribeWithApple(url: url, progress: progress)
             }
@@ -112,17 +120,14 @@ enum TranscriptionService {
         if let whisper {
             pipe = whisper
         } else {
-            let config: WhisperKitConfig
-            if WhisperModel.isReady {
-                await progress("Preparo il motore Preciso…")
-                config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
+            await progress("Preparo il motore Preciso…")
+            // Niente GPU: in background iOS non la concede. Lo spettrogramma va sulla CPU (è leggero),
+            // il resto sul Neural Engine.
+            let compute = ModelComputeOptions(melCompute: .cpuOnly, audioEncoderCompute: .cpuAndNeuralEngine,
+                                              textDecoderCompute: .cpuAndNeuralEngine)
+            let config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
                                           modelFolder: WhisperModel.folder.path, tokenizerFolder: WhisperModel.base,
-                                          download: false)
-            } else {
-                await progress("Scarico il motore Preciso (circa 630 MB, solo la prima volta)…")
-                config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
-                                          modelRepo: WhisperModel.repo, tokenizerFolder: WhisperModel.base)
-            }
+                                          computeOptions: compute, download: false)
             pipe = try await WhisperKit(config)
             whisper = pipe
         }

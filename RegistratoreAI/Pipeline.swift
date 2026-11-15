@@ -25,6 +25,8 @@ final class Pipeline: ObservableObject {
     @Published var errors: [UUID: String] = [:]
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var subjects: [UUID: Recording] = [:]
+    private var fractions: [UUID: Double] = [:]
 
     func isRunning(_ recording: Recording) -> Bool { tasks[recording.id] != nil }
 
@@ -33,7 +35,9 @@ final class Pipeline: ObservableObject {
     /// Esegue i passaggi che mancano. Con `retranscribe` riparte dalla trascrizione
     /// (le elaborazioni già fatte restano).
     func process(_ recording: Recording, in context: ModelContext, retranscribe: Bool = false) {
-        run(recording) { [self] in
+        recording.pipelinePending = true
+        try? context.save()
+        run(recording, in: context) { [self] in
             if retranscribe || recording.transcript == nil {
                 try await transcribe(recording, in: context)
             }
@@ -54,38 +58,70 @@ final class Pipeline: ObservableObject {
 
     /// Solo la separazione dei parlanti (dal menu della registrazione).
     func separateSpeakers(_ recording: Recording, in context: ModelContext) {
-        run(recording) { [self] in try await diarize(recording, in: context) }
+        run(recording, in: context) { [self] in try await diarize(recording, in: context) }
     }
 
     /// Solo il miglioramento con l'AI (dal menu della registrazione).
     func improve(_ recording: Recording, in context: ModelContext) {
-        run(recording) { [self] in try await revise(recording, in: context, applyNames: true) }
+        run(recording, in: context) { [self] in try await revise(recording, in: context, applyNames: true) }
     }
 
     /// Riprende le registrazioni rimaste a metà (es. app chiusa durante la trascrizione).
     func resumePending(_ recordings: [Recording], in context: ModelContext) {
-        for r in recordings where r.transcript == nil && r.transcriptionError == nil && !isRunning(r) {
+        for r in recordings where (r.pipelinePending || (r.transcript == nil && r.transcriptionError == nil)) && !isRunning(r) {
             process(r, in: context)
         }
     }
 
-    private func run(_ recording: Recording, _ work: @escaping () async throws -> Void) {
+    private func run(_ recording: Recording, in context: ModelContext, _ work: @escaping () async throws -> Void) {
         guard tasks[recording.id] == nil else { return }
         let id = recording.id
         errors[id] = nil
+        subjects[id] = recording
+        fractions[id] = 0
+        BackgroundWork.shared.begin(title: "Registratore AI")
         tasks[id] = Task {
+            var success = true
             do {
                 try await work()
             } catch {
+                success = false
                 errors[id] = Self.readable(error)
             }
+            recording.pipelinePending = false
+            try? context.save()
             status[id] = nil
             tasks[id] = nil
-            if TranscriptionEngine.current == .automatic { WhisperModel.shared.downloadIfAppropriate() }
+            subjects[id] = nil
+            fractions[id] = nil
+            LiveActivityManager.shared.finished(recording, success: success)
+            BackgroundWork.shared.end(success: success)
+            WhisperModel.shared.downloadIfAppropriate()
         }
     }
 
-    private func say(_ recording: Recording, _ text: String) { status[recording.id] = text }
+    /// Avanzamento indicativo per fase, mostrato nella Dynamic Island e nel sistema.
+    private static func fraction(for text: String) -> Double? {
+        let t = text.lowercased()
+        if t.contains("trascriv") || t.contains("motore") || t.contains("riconoscimento") { return 0.15 }
+        if t.contains("manchi") { return 0.45 }
+        if t.contains("voci") || t.contains("chi parla") { return 0.55 }
+        if t.contains("migliora") { return 0.7 }
+        if t.contains("sintesi") || t.contains("parte") || t.contains("elaborazione") { return 0.88 }
+        return nil
+    }
+
+    private func report(_ id: UUID, _ text: String) {
+        status[id] = text
+        if let f = Self.fraction(for: text) { fractions[id] = max(fractions[id] ?? 0, f) }
+        let f = fractions[id] ?? 0
+        if let recording = subjects[id] {
+            LiveActivityManager.shared.processing(recording, status: text, progress: f)
+        }
+        BackgroundWork.shared.update(text, fraction: f)
+    }
+
+    private func say(_ recording: Recording, _ text: String) { report(recording.id, text) }
 
     /// Messaggio comprensibile: i dettagli tecnici lunghi (percorsi di file, codici) non servono all'utente.
     static func readable(_ error: Error) -> String {
@@ -105,7 +141,7 @@ final class Pipeline: ObservableObject {
         say(recording, "Trascrivo…")
         do {
             let segments = try await TranscriptionService.transcribe(url: recording.audioURL) { [weak self] message in
-                self?.status[id] = message
+                self?.report(id, message)
             }
             recording.segments = Glossary.apply(glossary(context), to: segments)
             recording.originalSegments = []
@@ -131,7 +167,7 @@ final class Pipeline: ObservableObject {
         let known = profiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
         let profileNames = Dictionary(profiles.map { ($0.speakerKey, $0.name) }, uniquingKeysWith: { a, _ in a })
         let turns = try await DiarizationService.diarize(url: recording.audioURL, known: known) { [weak self] message in
-            self?.status[id] = message
+            self?.report(id, message)
         }
         let entries = glossary(context)
         recording.segments = Glossary.apply(entries, to: DiarizationService.assign(turns, to: recording.segments))
@@ -164,7 +200,7 @@ final class Pipeline: ObservableObject {
             title: recording.title, notes: recording.notes,
             glossaryTerms: Glossary.termsForClaude(entries)
         ) { [weak self] message in
-            self?.status[id] = message
+            self?.report(id, message)
         }
         if !recording.revisedByClaude { recording.originalSegments = base }
         var revised = Glossary.apply(entries, to: result.segments)
@@ -215,7 +251,7 @@ final class Pipeline: ObservableObject {
         do {
             if SummaryService.availabilityMessage == nil, let transcript = recording.transcript {
                 let text = try await SummaryService.summarize(transcript: transcript, template: template) { [weak self] message in
-                    self?.status[id] = message
+                    self?.report(id, message)
                 }
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
                 summary.recording = recording

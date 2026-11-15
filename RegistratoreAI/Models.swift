@@ -85,6 +85,8 @@ final class Recording {
     var speakerNamesUpdatedAt: Date?
     /// Nomi o ruoli dei parlanti proposti dall'AI, da confermare (id parlante → nome).
     var speakerSuggestionsData: Data?
+    /// Lavorazione automatica avviata e non ancora conclusa (riprende alla riapertura dell'app).
+    var pipelinePending: Bool = false
     @Relationship(deleteRule: .cascade, inverse: \Summary.recording)
     var summaries: [Summary] = []
 

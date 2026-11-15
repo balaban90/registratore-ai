@@ -138,12 +138,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             // iOS mette in pausa il registratore (es. chiamata in arrivo).
             isPaused = true
             statusMessage = "In pausa per una chiamata o un'altra app"
+            LiveActivityManager.shared.recordingPaused(elapsed: elapsed)
         case .ended:
             do {
                 try session.setActive(true)
                 recorder?.record()
                 isPaused = false
                 statusMessage = "Registrazione ripresa"
+                LiveActivityManager.shared.recordingResumed(elapsed: elapsed)
             } catch {
                 statusMessage = "Tocca Riprendi per continuare"
             }
@@ -191,6 +193,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             isPaused = false
             statusMessage = nil
             startTimer()
+            LiveActivityManager.shared.recordingStarted(title: "Nuova registrazione")
         } catch {
             statusMessage = "Errore: \(error.localizedDescription)"
         }
@@ -202,9 +205,11 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             try? session.setActive(true)
             recorder.record()
             isPaused = false
+            LiveActivityManager.shared.recordingResumed(elapsed: elapsed)
         } else {
             recorder.pause()
             isPaused = true
+            LiveActivityManager.shared.recordingPaused(elapsed: elapsed)
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -237,6 +242,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         if let result = stop() {
             Storage.delete(fileName: result.fileName)
         }
+        LiveActivityManager.shared.recordingDiscarded()
     }
 
     private func startTimer() {

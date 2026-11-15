@@ -13,8 +13,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.12.1"
-    CURRENT_PROJECT_VERSION: "14"
+    MARKETING_VERSION: "0.13.0"
+    CURRENT_PROJECT_VERSION: "16"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
@@ -24,11 +24,13 @@ targets:
     platform: iOS
     sources:
       - path: RegistratoreAI
+      - path: Shared
     dependencies:
       - package: FluidAudio
         product: FluidAudio
       - package: WhisperKit
         product: WhisperKit
+      - target: RegistratoreAIWidgets
     info:
       path: RegistratoreAI/Info.plist
       properties:
@@ -43,6 +45,13 @@ targets:
           - UIInterfaceOrientationPortrait
         UIBackgroundModes:
           - audio
+        NSSupportsLiveActivities: true
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(PRODUCT_BUNDLE_IDENTIFIER).processing.*
+        CFBundleURLTypes:
+          - CFBundleURLName: it.registratoreai.app
+            CFBundleURLSchemes:
+              - registratoreai
         NSMicrophoneUsageDescription: Serve il microfono per registrare riunioni, lezioni, colloqui e appunti vocali.
         NSSpeechRecognitionUsageDescription: La trascrizione avviene sul tuo iPhone, senza inviare l'audio in rete.
         UIFileSharingEnabled: true
@@ -56,6 +65,26 @@ targets:
         ENABLE_PREVIEWS: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  RegistratoreAIWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RegistratoreAIWidgets
+      - path: Shared
+    info:
+      path: RegistratoreAIWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Registratore AI
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: it.registratoreai.app.widgets
+        GENERATE_INFOPLIST_FILE: "NO"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"
 schemes:
   RegistratoreAI:
     build:

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct RecordView: View {
+    /// true se aperta dal widget o dal Centro di Controllo: la registrazione parte subito.
+    var autoStart = false
     let onFinish: (FinishedRecording) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -85,7 +87,12 @@ struct RecordView: View {
         } message: {
             Text("Consenti l'accesso al microfono in Impostazioni per registrare.")
         }
-        .onAppear { recorder.refreshInputs() }
+        .onAppear {
+            recorder.refreshInputs()
+            if autoStart && !recorder.isRecording {
+                Task { await recorder.start() }
+            }
+        }
     }
 
     private var header: some View {

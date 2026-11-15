@@ -13,6 +13,7 @@ struct ContentView: View {
     @Query(sort: \Recording.createdAt, order: .reverse) private var recordings: [Recording]
 
     @State private var showRecorder = false
+    @State private var autoStartRecording = false
     @State private var showImporter = false
     @State private var showSettings = false
     @State private var importError: String?
@@ -115,9 +116,19 @@ struct ContentView: View {
             .navigationTitle("Registrazioni")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $search, prompt: "Cerca per argomento, persona o parola")
+            .onOpenURL { url in
+                // Widget "Registra" e pulsante del Centro di Controllo.
+                guard url.host == "record" else { return }
+                path = []
+                autoStartRecording = true
+                showRecorder = true
+            }
+            .onChange(of: showRecorder) { _, shown in
+                if !shown { autoStartRecording = false }
+            }
             .task {
                 Pipeline.shared.resumePending(recordings, in: context)
-                if TranscriptionEngine.current == .automatic { WhisperModel.shared.downloadIfAppropriate() }
+                WhisperModel.shared.downloadIfAppropriate()
             }
             .navigationDestination(for: Recording.self) { recording in
                 RecordingDetailView(recording: recording)
@@ -143,7 +154,7 @@ struct ContentView: View {
                 SettingsView()
             }
             .fullScreenCover(isPresented: $showRecorder) {
-                RecordView { finished in
+                RecordView(autoStart: autoStartRecording) { finished in
                     save(finished)
                 }
             }

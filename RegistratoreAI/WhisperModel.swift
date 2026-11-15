@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import WhisperKit
+import UIKit
 
 /// Stato della rete: serve a scaricare il modello del motore Preciso solo con Wi-Fi o rete non a consumo.
 final class NetworkStatus: @unchecked Sendable {
@@ -71,25 +72,49 @@ final class WhisperModel: ObservableObject {
     }
 
     /// Avvia il download in background, solo se serve e se la rete non è a consumo.
+    /// Se per 2 minuti non avanza, lo interrompe: riproverà alla prossima occasione.
     func downloadIfAppropriate() {
-        guard !Self.isReady, downloadProgress == nil, NetworkStatus.shared.isUnmetered else { return }
+        guard TranscriptionEngine.current != .fast, !Self.isReady, downloadProgress == nil,
+              NetworkStatus.shared.isUnmetered else { return }
         downloadProgress = 0
         lastError = nil
         Self.isDownloading = true
+
+        let download = Task {
+            try FileManager.default.createDirectory(at: Self.base, withIntermediateDirectories: true)
+            var url = Self.base
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+            // Sessione di download in background: continua anche a schermo bloccato.
+            _ = try await WhisperKit.download(variant: Self.variant, downloadBase: Self.base,
+                                              useBackgroundSession: true, from: Self.repo) { progress in
+                let value = progress.fractionCompleted
+                Task { @MainActor in
+                    WhisperModel.shared.downloadProgress = value
+                }
+            }
+        }
+        let watchdog = Task {
+            // Conta solo il tempo con l'app aperta: in background il download prosegue per conto suo.
+            var stalled = 0.0
+            var lastSeen = downloadProgress ?? 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard UIApplication.shared.applicationState == .active else { continue }
+                let now = downloadProgress ?? 0
+                stalled = now > lastSeen ? 0 : stalled + 15
+                lastSeen = now
+                if stalled >= 180 { download.cancel(); break }
+            }
+        }
         Task {
             do {
-                try FileManager.default.createDirectory(at: Self.base, withIntermediateDirectories: true)
-                var url = Self.base
-                var values = URLResourceValues()
-                values.isExcludedFromBackup = true
-                try? url.setResourceValues(values)
-                _ = try await WhisperKit.download(variant: Self.variant, downloadBase: Self.base, from: Self.repo) { progress in
-                    let value = progress.fractionCompleted
-                    Task { @MainActor in WhisperModel.shared.downloadProgress = value }
-                }
+                try await download.value
             } catch {
-                lastError = error.localizedDescription
+                lastError = download.isCancelled ? "Download fermo: riproverà più tardi." : error.localizedDescription
             }
+            watchdog.cancel()
             Self.isDownloading = false
             downloadProgress = nil
         }
