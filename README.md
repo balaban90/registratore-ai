@@ -6,9 +6,12 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.12)
+## Cosa fa (versione 0.13)
 
 - **Fa tutto da sola:** dopo ogni registrazione trascrive, riconosce chi parla, migliora il testo con l'AI (se attiva), crea la Sintesi veloce e dà un titolo alla registrazione. Nell'elenco vedi titolo e anteprima della sintesi; la ricerca trova argomenti, persone e parole. Le scelte manuali sono in Impostazioni > Avanzate.
+- **Lavora anche a schermo bloccato:** trascrizione ed elaborazione continuano in background (iOS mostra l'avanzamento); il motore Preciso si scarica in background con il Wi-Fi.
+- **Dynamic Island e schermata di blocco:** cronometro durante la registrazione, poi l'avanzamento della lavorazione.
+- **Widget "Registra"** (Home e schermata di blocco) e **pulsante nel Centro di Controllo:** un tocco e parte la registrazione.
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
 - Sceglie il microfono, mostra il livello del segnale e passa da solo a quello USB-C appena lo colleghi.
