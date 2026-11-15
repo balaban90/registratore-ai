@@ -98,26 +98,75 @@ enum DiarizationService {
         return speaker.currentEmbedding
     }
 
-    /// Assegna a ogni frase il parlante che la copre di più.
+    /// Parlante che copre di più l'intervallo; se nessuno lo copre, il turno più vicino.
+    private static func speaker(for start: Double, _ end: Double, in turns: [SpeakerTurn]) -> String? {
+        var best: (id: String, overlap: Double)?
+        let e = max(end, start + 0.2)
+        for turn in turns {
+            let overlap = min(e, turn.end) - max(start, turn.start)
+            if overlap > 0, overlap > (best?.overlap ?? 0) {
+                best = (turn.speakerId, overlap)
+            }
+        }
+        if let best { return best.id }
+        let mid = (start + e) / 2
+        return turns.min { abs(($0.start + $0.end) / 2 - mid) < abs(($1.start + $1.end) / 2 - mid) }?.speakerId
+    }
+
+    /// Assegna i parlanti parola per parola: quando nella stessa frase cambia
+    /// chi parla, la frase viene divisa. Così una risposta breve detta senza
+    /// pausa ("Va bene, verifica a marzo") non finisce nel turno dell'altro.
+    /// Le frasi senza orari delle parole (es. già riviste dall'AI) ricevono un solo parlante.
     static func assign(_ turns: [SpeakerTurn], to segments: [TranscriptSegment]) -> [TranscriptSegment] {
-        segments.map { segment in
-            var best: (id: String, overlap: Double)?
-            let segEnd = max(segment.end, segment.start + 0.3)
-            for turn in turns {
-                let overlap = min(segEnd, turn.end) - max(segment.start, turn.start)
-                if overlap > 0, overlap > (best?.overlap ?? 0) {
-                    best = (turn.speakerId, overlap)
+        var output: [TranscriptSegment] = []
+        for segment in segments {
+            guard let words = segment.words, words.count > 1 else {
+                var s = segment
+                s.speaker = speaker(for: segment.start, segment.end, in: turns)
+                output.append(s)
+                continue
+            }
+
+            // 1. Un parlante per parola.
+            var labels = words.map { speaker(for: $0.start, $0.end, in: turns) }
+
+            // 2. Niente cambi di voce su frammenti minimi (meno di 2 parole e di 0,6 s):
+            //    sono quasi sempre errori di confine e vengono assorbiti dal vicino.
+            var changed = true
+            while changed {
+                changed = false
+                var runs: [(from: Int, to: Int)] = []
+                var a = 0
+                for i in 1...labels.count where i == labels.count || labels[i] != labels[a] {
+                    runs.append((a, i - 1)); a = i
+                }
+                guard runs.count > 1 else { break }
+                for (k, run) in runs.enumerated() {
+                    let count = run.to - run.from + 1
+                    let duration = words[run.to].end - words[run.from].start
+                    guard count < 2 && duration < 0.6 else { continue }
+                    let neighbour = k > 0 ? labels[runs[k - 1].to] : labels[runs[k + 1].from]
+                    for i in run.from...run.to { labels[i] = neighbour }
+                    changed = true
+                    break
                 }
             }
-            var s = segment
-            if let best {
-                s.speaker = best.id
-            } else {
-                // Nessuna sovrapposizione: il turno più vicino.
-                let nearest = turns.min { abs($0.start - segment.start) < abs($1.start - segment.start) }
-                s.speaker = nearest?.speakerId
+
+            // 3. Una frase per ogni tratto con lo stesso parlante.
+            if Set(labels.map { $0 ?? "" }).count == 1 {
+                var s = segment
+                s.speaker = labels[0]
+                output.append(s)
+                continue
             }
-            return s
+            var a = 0
+            for i in 1...words.count where i == words.count || labels[i] != labels[a] {
+                if let piece = TranscriptSegment.make(from: Array(words[a..<i]), speaker: labels[a]) {
+                    output.append(piece)
+                }
+                a = i
+            }
         }
+        return output
     }
 }

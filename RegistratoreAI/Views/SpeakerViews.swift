@@ -55,7 +55,7 @@ struct SpeakerEditSheet: View {
                 Section("Nome") {
                     TextField("Es. Marco, Dott.ssa Ferri, Io", text: $name)
                         .textInputAutocapitalization(.words)
-                    if !recording.speakerNames.isEmpty || !profiles.isEmpty {
+                    if !recording.speakerNames.isEmpty || !profiles.isEmpty || !recording.speakerSuggestions.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
                                 ForEach(suggestions, id: \.self) { s in
@@ -134,7 +134,13 @@ struct SpeakerEditSheet: View {
     private var suggestions: [String] {
         var all = Array(Set(recording.speakerNames.values).union(profiles.map(\.name)))
         all.removeAll { $0.isEmpty }
-        return all.sorted()
+        all.sort()
+        // Il nome proposto dall'AI per questa persona va per primo.
+        if let proposed = recording.speakerSuggestions[speakerId], !proposed.isEmpty {
+            all.removeAll { $0 == proposed }
+            all.insert(proposed, at: 0)
+        }
+        return all
     }
 
     private func touch() {

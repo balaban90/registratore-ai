@@ -264,19 +264,83 @@ enum ClaudeService {
 
     // MARK: - Revisione della trascrizione
 
-    /// Corregge solo gli errori evidenti di riconoscimento, riga per riga.
-    /// Usa sempre Haiku (economico). Le righe che Claude non restituisce, o che
-    /// cambia troppo, restano come nell'originale.
-    static func revise(segments: [TranscriptSegment], title: String, notes: String, glossaryTerms: String,
-                       progress: @escaping @MainActor (String) -> Void) async throws -> (segments: [TranscriptSegment], cost: Double) {
+    struct RevisionResult {
+        var segments: [TranscriptSegment]
+        /// Nomi o ruoli proposti dall'AI per i parlanti (id → nome), da confermare.
+        var suggestions: [String: String]
+        var cost: Double
+    }
+
+    private static let uncertainOpen = "⟨"
+    private static let uncertainClose = "⟩"
+
+    /// Testo della riga con le parole incerte marcate ⟨così⟩.
+    private static func marked(_ segment: TranscriptSegment) -> String {
+        guard let doubts = segment.uncertain, !doubts.isEmpty else { return segment.text }
+        var text = segment.text
+        for word in Set(doubts) {
+            let pattern = "(?<![\\p{L}\\p{N}⟨])" + NSRegularExpression.escapedPattern(for: word) + "(?![\\p{L}\\p{N}⟩])"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..., in: text)
+            text = regex.stringByReplacingMatches(in: text, range: range, withTemplate: uncertainOpen + "$0" + uncertainClose)
+        }
+        return text
+    }
+
+    /// Un solo passaggio con il modello economico che, insieme:
+    /// 1. corregge le parole sbagliate (soprattutto quelle marcate come incerte),
+    /// 2. rimette punteggiatura ed elenchi,
+    /// 3. controlla chi parla in base al contenuto e divide le righe in cui parlano due persone,
+    /// 4. propone nomi o ruoli dei parlanti.
+    /// Per risparmiare, l'AI restituisce solo le righe che cambia.
+    /// Le righe cambiate troppo (più corte o più lunghe del normale) restano come nell'originale.
+    static func revise(segments: [TranscriptSegment], speakers: [String], speakerNames: [String: String],
+                       title: String, notes: String, glossaryTerms: String,
+                       progress: @escaping @MainActor (String) -> Void) async throws -> RevisionResult {
+        // Etichette brevi per l'AI: P1, P2… nell'ordine in cui intervengono.
+        var labelFor: [String: String] = [:]
+        var idFor: [String: String] = [:]
+        for (i, id) in speakers.enumerated() {
+            labelFor[id] = "P\(i + 1)"
+            idFor["P\(i + 1)"] = id
+        }
+        let diarized = !speakers.isEmpty
+
         var instructions = """
-        Sei un correttore di trascrizioni automatiche.
-        Ricevi righe nel formato numero|testo. Mantieni la lingua originale. Correggi SOLO errori evidenti di riconoscimento vocale:
-        parole storpiate, sigle, nomi propri, numeri, punteggiatura e maiuscole.
-        NON riformulare, NON riassumere, NON togliere né aggiungere frasi, NON cambiare il senso.
-        Se non sei sicuro di una correzione, lascia il testo com'è.
-        Restituisci TUTTE le righe ricevute, nello stesso formato numero|testo, una per riga,
-        nello stesso ordine, senza nessun altro testo prima o dopo.
+        Sei un correttore di trascrizioni automatiche di registrazioni (riunioni, lezioni, colloqui, telefonate, appunti).
+        Ricevi righe nel formato numero|parlante|testo. Mantieni la lingua originale.
+
+        COSA FARE
+        1. Parole sbagliate: il riconoscitore confonde spesso parole dal suono simile (es. "preposti" per "posti",
+           "un'andata" per "una data", "ma i" per "mai"). Correggi le parole che nel contesto non hanno senso.
+           Le parole tra ⟨ ⟩ sono quelle su cui il riconoscitore era incerto: controllale con più attenzione.
+           Nel testo corretto non scrivere mai i simboli ⟨ ⟩.
+        2. Punteggiatura e struttura: rimetti punti, virgole, maiuscole e i due punti. Rendi chiari gli elenchi parlati
+           ("primo, …; secondo, …; terzo, …"). Correggi sigle, nomi propri e numeri.
+        3. Chi parla: il separatore delle voci sbaglia soprattutto quando le persone si rispondono senza pause.
+           Usa il contenuto (chi chiede, chi risponde, chi propone, chi accetta) per correggere il parlante.
+           Se in una riga parlano due persone, dividila: scrivi più righe con lo STESSO numero, una per parlante, nell'ordine.
+        """
+        if diarized {
+            instructions += "\n   Parlanti presenti: " + speakers.map { id -> String in
+                let label = labelFor[id] ?? "?"
+                if let name = speakerNames[id], !name.isEmpty { return "\(label) (\(name))" }
+                return label
+            }.joined(separator: ", ") + ". Usa queste etichette; una nuova (P\(speakers.count + 1)…) solo se compare davvero un'altra persona."
+        } else {
+            instructions += "\n   Le voci non sono state separate (parlante \"?\"). Se è chiaramente un dialogo, assegna tu P1, P2…; altrimenti lascia \"?\"."
+        }
+        instructions += """
+
+        4. Non riformulare, non riassumere, non togliere né aggiungere frasi, non cambiare il senso. Se non sei sicuro, lascia com'è.
+
+        FORMATO DELLA RISPOSTA
+        - Restituisci SOLO le righe che modifichi (testo o parlante), nel formato numero|parlante|testo, una per riga.
+          Se dividi una riga, restituisci tutte le sue parti. Le righe che non cambi non vanno ripetute.
+        - In fondo, solo se dal contenuto si capisce chiaramente il nome o il ruolo di qualcuno, aggiungi una riga:
+          #PARLANTI P1=nome o ruolo; P2=nome o ruolo
+          (es. "Marco", "Docente", "Cliente"). Non inventare: se non è chiaro, ometti quella persona.
+        - Nessun altro testo prima o dopo.
 
         Registrazione: "\(title)"
         """
@@ -295,33 +359,100 @@ enum ClaudeService {
             if size + seg.text.count > 8_000, !current.isEmpty {
                 chunks.append(current); current = []; size = 0
             }
-            current.append(i); size += seg.text.count + 6
+            current.append(i); size += seg.text.count + 10
         }
         if !current.isEmpty { chunks.append(current) }
 
-        var result = segments
+        var replacements: [Int: [TranscriptSegment]] = [:]
+        var suggestions: [String: String] = [:]
         var totalCost = 0.0
+
+        func resolve(_ label: String, fallback: String?) -> String? {
+            let l = label.trimmingCharacters(in: .whitespaces).uppercased()
+            if l.isEmpty || l == "?" { return fallback }
+            if let id = idFor[l] { return id }
+            guard l.hasPrefix("P"), let n = Int(l.dropFirst()), n > 0, n < 20 else { return fallback }
+            let id = "ai-\(n)"
+            idFor[l] = id
+            return id
+        }
+
         for (n, chunk) in chunks.enumerated() {
             await progress("L'AI migliora la parte \(n + 1) di \(chunks.count)…")
-            let body = chunk.map { "\($0)|\(segments[$0].text)" }.joined(separator: "\n")
+            let body = chunk.map { i -> String in
+                let label = segments[i].speaker.flatMap { labelFor[$0] } ?? "?"
+                return "\(i)|\(label)|\(marked(segments[i]))"
+            }.joined(separator: "\n")
             let reply = try await send(cachedContext: instructions,
                                        messages: [ClaudeMessage(role: "user", content: body)],
                                        maxTokens: 8_000, model: .haiku)
             totalCost += reply.costUSD
-            for line in reply.text.components(separatedBy: "\n") {
-                guard let bar = line.firstIndex(of: "|"),
-                      let index = Int(line[..<bar].trimmingCharacters(in: .whitespaces)),
-                      chunk.contains(index) else { continue }
-                let corrected = String(line[line.index(after: bar)...]).trimmingCharacters(in: .whitespaces)
-                let original = segments[index].text
-                // Protezione: scarta correzioni che accorciano o allungano troppo la frase.
-                let ratio = Double(corrected.count) / Double(max(original.count, 1))
-                if !corrected.isEmpty && ratio > 0.6 && ratio < 1.6 {
-                    result[index].text = corrected
+
+            var pieces: [Int: [(label: String, text: String)]] = [:]
+            for raw in reply.text.components(separatedBy: "\n") {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.uppercased().hasPrefix("#PARLANTI") {
+                    let list = line.dropFirst("#PARLANTI".count)
+                    for pair in list.split(separator: ";") {
+                        let parts = pair.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                        guard parts.count == 2, !parts[1].isEmpty, parts[1] != "?",
+                              let id = resolve(parts[0], fallback: nil), suggestions[id] == nil else { continue }
+                        suggestions[id] = String(parts[1].prefix(40))
+                    }
+                    continue
                 }
+                let fields = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+                guard fields.count == 3,
+                      let index = Int(fields[0].trimmingCharacters(in: .whitespaces)),
+                      chunk.contains(index) else { continue }
+                let text = fields[2]
+                    .replacingOccurrences(of: uncertainOpen, with: "")
+                    .replacingOccurrences(of: uncertainClose, with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                guard !text.isEmpty else { continue }
+                pieces[index, default: []].append((fields[1], text))
+            }
+
+            for (index, parts) in pieces {
+                let original = segments[index]
+                let total = parts.reduce(0) { $0 + $1.text.count }
+                // Protezione: scarta correzioni che accorciano o allungano troppo.
+                let ratio = Double(total) / Double(max(original.text.count, 1))
+                guard ratio > 0.6 && ratio < 1.6 else { continue }
+
+                if parts.count == 1 {
+                    var s = original
+                    let part = parts[0]
+                    if part.text != original.text { s.text = part.text; s.words = nil }
+                    s.speaker = resolve(part.label, fallback: original.speaker)
+                    s.uncertain = original.uncertain?.filter { part.text.contains($0) }
+                    if s.uncertain?.isEmpty == true { s.uncertain = nil }
+                    replacements[index] = [s]
+                    continue
+                }
+
+                // Riga divisa: l'orario si ripartisce in proporzione alla lunghezza delle parti.
+                var result: [TranscriptSegment] = []
+                var cursor = original.start
+                let span = max(original.end - original.start, 0)
+                for part in parts {
+                    let share = span * Double(part.text.count) / Double(max(total, 1))
+                    var s = TranscriptSegment(start: cursor, end: cursor + share, text: part.text,
+                                              speaker: resolve(part.label, fallback: original.speaker))
+                    let doubts = original.uncertain?.filter { part.text.contains($0) } ?? []
+                    s.uncertain = doubts.isEmpty ? nil : doubts
+                    result.append(s)
+                    cursor += share
+                }
+                replacements[index] = result
             }
         }
-        return (result, totalCost)
+
+        var output: [TranscriptSegment] = []
+        for (i, seg) in segments.enumerated() {
+            output.append(contentsOf: replacements[i] ?? [seg])
+        }
+        return RevisionResult(segments: output, suggestions: suggestions, cost: totalCost)
     }
 
     /// Verifica rapida della chiave con una richiesta minima.

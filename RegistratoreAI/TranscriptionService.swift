@@ -61,7 +61,7 @@ enum TranscriptionService {
             locale: locale,
             transcriptionOptions: [],
             reportingOptions: [],
-            attributeOptions: [.audioTimeRange]
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence]
         )
 
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
@@ -75,18 +75,32 @@ enum TranscriptionService {
         let collector = Task { () throws -> [TranscriptSegment] in
             var segments: [TranscriptSegment] = []
             for try await result in transcriber.results {
-                let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { continue }
-                var start: Double?
-                var end: Double?
+                // Parola per parola, con orario e affidabilità.
+                var words: [TranscriptWord] = []
+                var pending = ""   // testo senza orario (spazi, punteggiatura): va alla parola vicina
                 for run in result.text.runs {
+                    let piece = String(result.text[run.range].characters)
                     if let range = run.audioTimeRange {
-                        if start == nil { start = range.start.seconds }
-                        end = range.end.seconds
+                        words.append(TranscriptWord(text: pending + piece,
+                                                    start: range.start.seconds,
+                                                    end: range.end.seconds,
+                                                    confidence: run.transcriptionConfidence))
+                        pending = ""
+                    } else if !words.isEmpty {
+                        words[words.count - 1].text += piece
+                    } else {
+                        pending += piece
                     }
                 }
-                let s = start ?? segments.last?.end ?? 0
-                segments.append(TranscriptSegment(start: s, end: end ?? s, text: text))
+                if let segment = TranscriptSegment.make(from: words) {
+                    segments.append(segment)
+                } else {
+                    // Nessun orario disponibile: frase intera, come prima.
+                    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { continue }
+                    let s = segments.last?.end ?? 0
+                    segments.append(TranscriptSegment(start: s, end: s, text: text))
+                }
             }
             return segments
         }

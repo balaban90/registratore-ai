@@ -343,8 +343,18 @@ struct RecordingDetailView: View {
                 }
             }
 
+            if recording.diarized && !pendingSuggestions.isEmpty && !showOriginal {
+                suggestionsBanner
+            }
+
             if recording.diarized {
                 speakerChips
+            }
+
+            if shownSegments.contains(where: { !($0.uncertain ?? []).isEmpty }) {
+                Label("Le parole evidenziate sono quelle su cui il riconoscimento era incerto.", systemImage: "questionmark.bubble")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -382,7 +392,7 @@ struct RecordingDetailView: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(isCurrent ? Theme.accentText : .secondary)
                                 .frame(width: 44, alignment: .leading)
-                            Text(segment.text)
+                            Text(highlighted(segment))
                                 .font(.callout)
                                 .foregroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
@@ -418,6 +428,71 @@ struct RecordingDetailView: View {
             .padding(8)
             .card(cornerRadius: 20)
         }
+    }
+
+    /// Testo della frase con le parole incerte evidenziate.
+    private func highlighted(_ segment: TranscriptSegment) -> AttributedString {
+        var text = AttributedString(segment.text)
+        guard let doubts = segment.uncertain, !doubts.isEmpty else { return text }
+        for word in Set(doubts) {
+            var searchStart = text.startIndex
+            while let range = text[searchStart...].range(of: word) {
+                text[range].backgroundColor = Theme.highlight.opacity(0.22)
+                searchStart = range.upperBound
+            }
+        }
+        return text
+    }
+
+    /// Parlanti senza nome per cui l'AI ha una proposta.
+    private var pendingSuggestions: [String] {
+        let suggestions = recording.speakerSuggestions
+        return recording.speakerOrder.filter { suggestions[$0] != nil && (recording.speakerNames[$0] ?? "").isEmpty }
+    }
+
+    private var suggestionsBanner: some View {
+        let suggestions = recording.speakerSuggestions
+        let ordered = pendingSuggestions
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("L'AI propone chi parla", systemImage: "person.crop.circle.badge.questionmark")
+                .font(.subheadline.weight(.semibold))
+            ForEach(ordered, id: \.self) { id in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(SpeakerColors.color(for: id, in: recording.speakerOrder))
+                        .frame(width: 8, height: 8)
+                    Text(recording.speakerName(id))
+                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                    Text(suggestions[id] ?? "").fontWeight(.semibold)
+                }
+                .font(.footnote)
+            }
+            HStack {
+                Button("Applica") { applySuggestions() }
+                    .buttonStyle(.borderedProminent)
+                Button("Ignora") {
+                    recording.speakerSuggestions = [:]
+                    try? context.save()
+                }
+                .buttonStyle(.bordered)
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(cornerRadius: 20)
+    }
+
+    private func applySuggestions() {
+        var names = recording.speakerNames
+        for (id, name) in recording.speakerSuggestions where (names[id] ?? "").isEmpty {
+            names[id] = name
+        }
+        recording.speakerNames = names
+        recording.speakerSuggestions = [:]
+        recording.speakerNamesUpdatedAt = .now
+        recording.transcript = recording.plainTranscript
+        try? context.save()
     }
 
     private var speakerChips: some View {
@@ -456,7 +531,7 @@ struct RecordingDetailView: View {
                 Button {
                     reviseWithClaude()
                 } label: {
-                    Label(recording.revisedByClaude ? "Migliora di nuovo con l'AI" : "Migliora con l'AI (≈1 cent/ora)", systemImage: "wand.and.stars")
+                    Label(recording.revisedByClaude ? "Migliora di nuovo con l'AI" : "Migliora con l'AI: testo e parlanti (≈1 cent/ora)", systemImage: "wand.and.stars")
                 }
             }
             Button {
@@ -566,6 +641,7 @@ struct RecordingDetailView: View {
                 revisionCost = nil
                 recording.diarized = false
                 recording.speakerNames = [:]
+                recording.speakerSuggestions = [:]
                 recording.transcript = recording.plainTranscript
                 recording.transcriptionError = nil
                 try? context.save()
@@ -594,10 +670,12 @@ struct RecordingDetailView: View {
                 let turns = try await DiarizationService.diarize(url: url, known: known) { message in
                     progressText = message
                 }
-                recording.segments = DiarizationService.assign(turns, to: recording.segments)
+                // Le frasi divise vengono ricostruite dalle parole originali: si riapplica il glossario.
+                recording.segments = Glossary.apply(glossary, to: DiarizationService.assign(turns, to: recording.segments))
                 if recording.revisedByClaude {
-                    recording.originalSegments = DiarizationService.assign(turns, to: recording.originalSegments)
+                    recording.originalSegments = Glossary.apply(glossary, to: DiarizationService.assign(turns, to: recording.originalSegments))
                 }
+                recording.speakerSuggestions = [:]
                 // I parlanti riconosciuti dai profili vocali prendono subito il nome.
                 var names: [String: String] = [:]
                 for id in recording.speakerOrder {
@@ -700,15 +778,35 @@ struct RecordingDetailView: View {
         let title = recording.title
         let notes = recording.notes
         let terms = Glossary.termsForClaude(glossary)
+        let speakers = recording.diarized ? recording.speakerOrder : []
+        let names = recording.speakerNames
         Task {
             do {
-                let result = try await ClaudeService.revise(segments: base, title: title, notes: notes, glossaryTerms: terms) { message in
+                let result = try await ClaudeService.revise(segments: base, speakers: speakers, speakerNames: names,
+                                                            title: title, notes: notes, glossaryTerms: terms) { message in
                     progressText = message
                 }
                 if !recording.revisedByClaude {
                     recording.originalSegments = base
                 }
-                recording.segments = Glossary.apply(glossary, to: result.segments)
+                var revised = Glossary.apply(glossary, to: result.segments)
+                // Voci non separate: l'AI può averle distinte lei. Vale solo se le persone sono almeno due.
+                if !recording.diarized {
+                    let found = Set(revised.compactMap(\.speaker))
+                    if found.count >= 2 {
+                        recording.diarized = true
+                    } else {
+                        revised = revised.map { var s = $0; s.speaker = nil; return s }
+                    }
+                }
+                let speakersChanged = zip(base, revised).contains { $0.speaker != $1.speaker } || base.count != revised.count
+                recording.segments = revised
+                if speakersChanged { recording.speakerNamesUpdatedAt = .now }
+                // Nomi proposti dall'AI: solo per chi non ha già un nome.
+                let order = Set(recording.speakerOrder)
+                recording.speakerSuggestions = result.suggestions.filter { id, _ in
+                    order.contains(id) && (recording.speakerNames[id] ?? "").isEmpty
+                }
                 recording.revisedByClaude = true
                 recording.transcript = recording.plainTranscript
                 showOriginal = false

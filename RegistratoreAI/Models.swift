@@ -1,6 +1,15 @@
 import Foundation
 import SwiftData
 
+/// Parola riconosciuta, con il suo orario e quanto il riconoscitore ne è sicuro.
+struct TranscriptWord: Codable, Hashable {
+    /// Testo così come esce dal riconoscitore (spazi e punteggiatura inclusi).
+    var text: String
+    var start: Double
+    var end: Double
+    var confidence: Double?
+}
+
 struct TranscriptSegment: Codable, Hashable, Identifiable {
     var id = UUID()
     var start: Double
@@ -8,6 +17,27 @@ struct TranscriptSegment: Codable, Hashable, Identifiable {
     var text: String
     /// Identificativo del parlante (nil se le voci non sono state separate).
     var speaker: String?
+    /// Parole con orario: servono a dividere la frase quando cambia chi parla.
+    /// Restano solo finché il testo è quello originale del riconoscitore.
+    var words: [TranscriptWord]?
+    /// Parole su cui il riconoscitore era poco sicuro (da evidenziare e far controllare all'AI).
+    var uncertain: [String]?
+
+    /// Soglia sotto cui una parola è considerata incerta.
+    static let uncertainThreshold = 0.5
+
+    /// Ricostruisce testo e parole incerte a partire dalle parole.
+    static func make(from words: [TranscriptWord], speaker: String? = nil) -> TranscriptSegment? {
+        let text = words.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let first = words.first, let last = words.last else { return nil }
+        let doubts = words.compactMap { w -> String? in
+            guard let c = w.confidence, c < uncertainThreshold else { return nil }
+            let clean = w.text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            return clean.count >= 2 ? clean : nil
+        }
+        return TranscriptSegment(start: first.start, end: last.end, text: text, speaker: speaker,
+                                 words: words, uncertain: doubts.isEmpty ? nil : doubts)
+    }
 }
 
 /// Profilo vocale salvato: permette di riconoscere una persona nelle nuove registrazioni.
@@ -53,6 +83,8 @@ final class Recording {
     var diarized: Bool = false
     var speakerNamesData: Data?
     var speakerNamesUpdatedAt: Date?
+    /// Nomi o ruoli dei parlanti proposti dall'AI, da confermare (id parlante → nome).
+    var speakerSuggestionsData: Data?
     @Relationship(deleteRule: .cascade, inverse: \Summary.recording)
     var summaries: [Summary] = []
 
@@ -94,6 +126,16 @@ final class Recording {
         }
         set {
             speakerNamesData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var speakerSuggestions: [String: String] {
+        get {
+            guard let speakerSuggestionsData else { return [:] }
+            return (try? JSONDecoder().decode([String: String].self, from: speakerSuggestionsData)) ?? [:]
+        }
+        set {
+            speakerSuggestionsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
         }
     }
 
