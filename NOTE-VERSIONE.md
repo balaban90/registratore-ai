@@ -1,0 +1,1 @@
+Segnalazione automatica dei problemi: quando l'app incontra un errore o un crash invia da sola il file diagnostico per la correzione. Nuovo pulsante "Aggiorna" per installare le nuove versioni con SideStore.

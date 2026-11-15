@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -53,6 +56,22 @@ jobs:
           name: RegistratoreAI-ipa
           path: RegistratoreAI.ipa
           retention-days: 30
+
+      - name: Pubblica la versione (aggiornamento dall'app)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(grep -E 'MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          BUILD=$(grep -E 'CURRENT_PROJECT_VERSION:' project.yml | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          TAG="v${VER}-${BUILD}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Versione $TAG già pubblicata: per pubblicarne una nuova aumenta CURRENT_PROJECT_VERSION"
+            exit 0
+          fi
+          NOTES=NOTE-VERSIONE.md
+          [ -f "$NOTES" ] || echo "Nuova versione." > "$NOTES"
+          gh release create "$TAG" RegistratoreAI.ipa --title "Registratore AI $VER (build $BUILD)" --notes-file "$NOTES" --latest
 
       - name: Carica il log in caso di errore
         if: failure()

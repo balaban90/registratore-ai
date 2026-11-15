@@ -102,6 +102,9 @@ final class Pipeline: ObservableObject {
             LiveActivityManager.shared.finished(recording, success: success)
             BackgroundWork.shared.end(success: success)
             WhisperModel.shared.downloadIfAppropriate()
+            if !success || errors[id] != nil {
+                DiagnosticUploader.shared.sendIfNeeded(reason: "errore nella lavorazione")
+            }
         }
     }
 

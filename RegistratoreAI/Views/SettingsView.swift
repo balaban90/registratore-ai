@@ -20,6 +20,13 @@ struct SettingsView: View {
     @State private var report: DiagnosticReport?
     @State private var logSize = DiagnosticLog.sizeDescription
     @State private var confirmClear = false
+    @AppStorage(DiagnosticUploader.autoKey) private var autoUpload = true
+    @ObservedObject private var uploader = DiagnosticUploader.shared
+    @ObservedObject private var updates = UpdateChecker.shared
+    @State private var githubTokenInput = ""
+    @State private var hasGitHubToken = DiagnosticUploader.isConfigured
+    @State private var githubMessage: String?
+    @State private var problemNote = ""
 
     var body: some View {
         NavigationStack {
@@ -153,6 +160,76 @@ struct SettingsView: View {
                     Text("Crea un file di testo con le impostazioni, lo stato delle ultime registrazioni e il registro delle attività, utile per segnalare un problema. Non contiene audio, testi o la chiave API.")
                 }
 
+                Section {
+                    if hasGitHubToken {
+                        Toggle("Invio automatico", isOn: $autoUpload)
+                        TextField("Cosa è successo? (facoltativo)", text: $problemNote, axis: .vertical)
+                            .lineLimit(1...4)
+                        Button {
+                            Task {
+                                if await uploader.send(reason: "segnalazione manuale", note: problemNote) { problemNote = "" }
+                            }
+                        } label: {
+                            if uploader.sending {
+                                HStack { ProgressView(); Text("Invio…") }
+                            } else {
+                                Label("Invia segnalazione ora", systemImage: "paperplane")
+                            }
+                        }
+                        .disabled(uploader.sending)
+                        if let last = DiagnosticUploader.lastSent {
+                            LabeledContent("Ultimo invio", value: last.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        Button("Rimuovi token", role: .destructive) {
+                            Keychain.delete(DiagnosticUploader.tokenKey)
+                            hasGitHubToken = false
+                        }
+                    } else {
+                        SecureField("Token GitHub", text: $githubTokenInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Salva") { saveGitHubToken() }
+                            .disabled(githubTokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if let message = githubMessage ?? uploader.lastResult {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Segnalazione automatica dei problemi")
+                } footer: {
+                    Text("Quando l'app incontra un errore o un crash, invia il file diagnostico al repository privato \(DiagnosticUploader.repository) per la correzione. Il token è salvato nel Portachiavi.")
+                }
+
+                Section {
+                    if let release = updates.available {
+                        Button {
+                            updates.install(release)
+                        } label: {
+                            Label("Aggiorna a \(release.version)", systemImage: "arrow.down.circle.fill")
+                        }
+                        if !release.notes.isEmpty {
+                            Text(release.notes).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button {
+                            Task { await updates.check(force: true) }
+                        } label: {
+                            if updates.checking {
+                                HStack { ProgressView(); Text("Controllo…") }
+                            } else {
+                                Label("Controlla aggiornamenti", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                        }
+                    }
+                    if let message = updates.lastMessage {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Aggiornamenti")
+                } footer: {
+                    Text("Le nuove versioni si installano con SideStore, senza computer.")
+                }
+
                 Section("Informazioni") {
                     LabeledContent("Versione", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                     if let message = SummaryService.availabilityMessage {
@@ -180,6 +257,21 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fine") { dismiss() }
                 }
+            }
+        }
+    }
+
+    private func saveGitHubToken() {
+        let token = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        githubMessage = "Verifico…"
+        Task {
+            if let problem = await uploader.test(token: token) {
+                githubMessage = problem
+            } else {
+                Keychain.set(token, for: DiagnosticUploader.tokenKey)
+                githubTokenInput = ""
+                hasGitHubToken = true
+                githubMessage = "Token verificato. Le segnalazioni partiranno da sole."
             }
         }
     }

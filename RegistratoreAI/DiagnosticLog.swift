@@ -51,6 +51,7 @@ enum DiagnosticLog {
         var text = message
         if let error { text += " — \(describe(error))" }
         write("ERR  ", area, text)
+        DiagnosticUploader.markPending()
     }
 
     /// Descrizione tecnica completa dell'errore (tipo, dominio, codice), più utile del messaggio per l'utente.
@@ -117,7 +118,7 @@ enum DiagnosticLog {
 
     /// Crea il file di testo con le informazioni sull'app e il registro, pronto da condividere.
     @MainActor
-    static func makeReport(context: ModelContext) -> URL? {
+    static func makeReport(context: ModelContext, reason: String = "esportazione manuale", note: String? = nil, maxLogBytes: Int? = nil) -> URL? {
         queue.sync {} // attende che le ultime righe siano scritte
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
@@ -127,7 +128,11 @@ enum DiagnosticLog {
 
         var r = "RAPPORTO DIAGNOSTICO — Registratore AI\n"
         r += "Creato: \(stamp.string(from: .now)) (\(TimeZone.current.identifier))\n"
+        r += "Motivo: \(reason)\n"
         r += "Non contiene audio, testi delle trascrizioni, elaborazioni o la chiave API.\n\n"
+        if let note, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            r += "== NOTA DELL'UTENTE ==\n\(note.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
+        }
 
         r += "== APP E DISPOSITIVO ==\n"
         r += "Versione app: \(version) (build \(build))\n"
@@ -175,9 +180,15 @@ enum DiagnosticLog {
             if let e = running.errors[rec.id] { r += "   ultimo errore: \(e)\n" }
         }
         r += "\n== REGISTRO ==\n"
+        var log = ""
         for url in [previousURL, currentURL] {
-            if let text = try? String(contentsOf: url, encoding: .utf8) { r += text }
+            if let text = try? String(contentsOf: url, encoding: .utf8) { log += text }
         }
+        if let maxLogBytes, log.utf8.count > maxLogBytes {
+            let tail = String(decoding: Array(log.utf8.suffix(maxLogBytes)), as: UTF8.self)
+            log = "[… parte più vecchia del registro omessa …]\n" + (tail.split(separator: "\n", maxSplits: 1).last.map(String.init) ?? tail)
+        }
+        r += log
 
         let name = "diagnostica-registratore-\(Storage.newFileName(ext: "txt"))"
         let out = URL.temporaryDirectory.appending(path: name)

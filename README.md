@@ -6,7 +6,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.14)
+## Cosa fa (versione 0.15)
 
 - **Fa tutto da sola:** dopo ogni registrazione trascrive, riconosce chi parla, migliora il testo con l'AI (se attiva), crea la Sintesi veloce e dà un titolo alla registrazione. Nell'elenco vedi titolo e anteprima della sintesi; la ricerca trova argomenti, persone e parole. Le scelte manuali sono in Impostazioni > Avanzate.
 - **Lavora anche a schermo bloccato:** trascrizione ed elaborazione continuano in background (iOS mostra l'avanzamento); il motore Preciso si scarica in background con il Wi-Fi.
@@ -32,6 +32,8 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 - **Invia all'app Claude:** prepara il testo con il modello scelto e lo condivide con l'app Claude (lo copia anche negli appunti).
 - Esporta in PDF, RTF (si apre con Word e Pages), testo o audio.
 - **File diagnostico:** in Impostazioni > Diagnostica > *Esporta file diagnostico* crea un file di testo con versione, impostazioni, stato delle ultime registrazioni, errori, crash segnalati da iOS e registro delle attività (registrazione, trascrizione, parlanti, AI, download del motore Preciso). Non contiene audio, testi o la chiave API. Mandalo a Claude per far correggere i problemi.
+- **Segnalazione automatica:** con il token GitHub inserito in Impostazioni, quando c'è un errore o un crash il file diagnostico va da solo nel repository privato `registratore-ai-diagnostica`, dove viene analizzato e corretto.
+- **Aggiorna dall'app:** quando esce una nuova versione compare "Aggiornamento disponibile"; un tocco e SideStore la installa, senza computer.
 
 ## Prima installazione (una volta sola)
 

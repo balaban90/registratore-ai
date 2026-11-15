@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var search = ""
     @ObservedObject private var pipeline = Pipeline.shared
     @State private var toDelete: Recording?
+    @ObservedObject private var updates = UpdateChecker.shared
 
     private var filtered: [Recording] {
         let q = search.trimmingCharacters(in: .whitespaces)
@@ -61,6 +62,32 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if let release = updates.available {
+                    Button {
+                        updates.install(release)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Aggiornamento disponibile · \(release.version)").font(.subheadline.weight(.semibold))
+                                Text(release.notes.isEmpty ? "Tocca per aggiornare" : release.notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Text("Aggiorna").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 20, bottom: 5, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
                 if recordings.isEmpty {
                     emptyState
                         .listRowBackground(Color.clear)
@@ -129,6 +156,7 @@ struct ContentView: View {
             .task {
                 Pipeline.shared.resumePending(recordings, in: context)
                 WhisperModel.shared.downloadIfAppropriate()
+                await UpdateChecker.shared.check()
             }
             .navigationDestination(for: Recording.self) { recording in
                 RecordingDetailView(recording: recording)
