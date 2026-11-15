@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage(ClaudeService.summaryModelKey) private var summaryModelRaw = ClaudeModel.sonnet.rawValue
     @AppStorage(ClaudeService.chatModelKey) private var chatModelRaw = ClaudeModel.haiku.rawValue
     @AppStorage(TranscriptionLanguage.defaultsKey) private var languageRaw = TranscriptionLanguage.italian.rawValue
+    @AppStorage(TranscriptionEngine.defaultsKey) private var engineRaw = TranscriptionEngine.fast.rawValue
 
     @State private var keyInput = ""
     @State private var hasKey = ClaudeService.isConfigured
@@ -22,10 +23,15 @@ struct SettingsView: View {
                             Text(language.label).tag(language.rawValue)
                         }
                     }
+                    Picker("Motore", selection: $engineRaw) {
+                        ForEach(TranscriptionEngine.allCases) { engine in
+                            Text(engine.label).tag(engine.rawValue)
+                        }
+                    }
                 } header: {
                     Text("Trascrizione")
                 } footer: {
-                    Text("Lingua parlata nelle registrazioni. Per applicarla a una registrazione esistente: ⋯ > Rifai la trascrizione.")
+                    Text("Preciso riconosce meglio il parlato colloquiale ma è più lento e richiede un download di circa 630 MB la prima volta. Entrambi i motori lavorano sul dispositivo. Per applicare le modifiche a una registrazione esistente: ⋯ > Rifai la trascrizione.")
                 }
 
                 Section {

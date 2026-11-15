@@ -42,6 +42,7 @@ struct RecordingDetailView: View {
     @State private var claudeReady = ClaudeService.isConfigured
     @State private var showOriginal = false
     @State private var revisionCost: Double?
+    @State private var engineChoice: EngineChoice = .automatic
 
     private var templates: [SummaryTemplate] {
         SummaryTemplate.available(custom: customTemplates)
@@ -183,10 +184,9 @@ struct RecordingDetailView: View {
         } else {
             HStack(spacing: 10) {
                 Menu {
-                    // Ogni modello parte con il motore più adatto.
                     Section {
                         ForEach(templates) { template in
-                            let engine = effectiveEngine(for: template)
+                            let engine = engineToUse(for: template)
                             Button { run(template, on: engine) } label: {
                                 Label {
                                     Text(template.name)
@@ -197,25 +197,21 @@ struct RecordingDetailView: View {
                             }
                         }
                     }
-                    Menu {
-                        if claudeReady {
-                            Section(SummaryEngine.cloud.label) {
-                                ForEach(templates) { template in
-                                    Button { run(template, on: .cloud) } label: {
-                                        Label(template.name, systemImage: template.icon)
-                                    }
-                                }
+                    // Un'unica scelta: chi fa l'elaborazione. "Automatico" usa il motore consigliato per ogni modello.
+                    Section {
+                        Picker(selection: $engineChoice) {
+                            ForEach(availableChoices) { choice in
+                                Text(choice.label).tag(choice)
+                            }
+                        } label: {
+                            Label {
+                                Text("Motore")
+                                Text(engineChoice.label)
+                            } icon: {
+                                Image(systemName: "cpu")
                             }
                         }
-                        Section(SummaryEngine.device.label) {
-                            ForEach(templates) { template in
-                                Button { run(template, on: .device) } label: {
-                                    Label(template.name, systemImage: template.icon)
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Scegli il motore", systemImage: "cpu")
+                        .pickerStyle(.menu)
                     }
                 } label: {
                     Label("Nuova elaborazione", systemImage: "sparkles")
@@ -564,8 +560,10 @@ struct RecordingDetailView: View {
                     Label("Ripristina l'originale", systemImage: "arrow.uturn.backward")
                 }
             }
-            Button {
-                transcribe()
+            Menu {
+                ForEach(TranscriptionEngine.allCases) { engine in
+                    Button(engine.label) { transcribe(engine: engine) }
+                }
             } label: {
                 Label("Rifai la trascrizione", systemImage: "arrow.clockwise")
             }
@@ -641,7 +639,7 @@ struct RecordingDetailView: View {
         shareItem = ShareItem(items: [url])
     }
 
-    private func transcribe() {
+    private func transcribe(engine: TranscriptionEngine = .current) {
         guard !isTranscribing else { return }
         isTranscribing = true
         errorText = nil
@@ -649,7 +647,7 @@ struct RecordingDetailView: View {
         let url = recording.audioURL
         Task {
             do {
-                let segments = try await TranscriptionService.transcribe(url: url) { message in
+                let segments = try await TranscriptionService.transcribe(url: url, engine: engine) { message in
                     progressText = message
                 }
                 recording.segments = Glossary.apply(glossary, to: segments)
@@ -746,11 +744,21 @@ struct RecordingDetailView: View {
         }
     }
 
-    /// Motore da usare: quello consigliato dal modello, se disponibile.
-    private func effectiveEngine(for template: SummaryTemplate) -> SummaryEngine {
-        if template.engine == .cloud && !claudeReady { return .device }
-        if template.engine == .device && SummaryService.availabilityMessage != nil && claudeReady { return .cloud }
-        return template.engine
+    /// Scelte del menu "Motore": senza chiave API l'AI avanzata non compare.
+    private var availableChoices: [EngineChoice] {
+        claudeReady ? EngineChoice.allCases : [.automatic, .device]
+    }
+
+    /// Motore da usare per un modello, in base alla scelta del menu.
+    private func engineToUse(for template: SummaryTemplate) -> SummaryEngine {
+        switch engineChoice {
+        case .cloud where claudeReady: return .cloud
+        case .device: return .device
+        default:
+            if template.engine == .cloud && !claudeReady { return .device }
+            if template.engine == .device && SummaryService.availabilityMessage != nil && claudeReady { return .cloud }
+            return template.engine
+        }
     }
 
     private func run(_ template: SummaryTemplate, on engine: SummaryEngine) {
@@ -1053,4 +1061,17 @@ struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// Scelta del motore nel menu "Nuova elaborazione".
+enum EngineChoice: String, CaseIterable, Identifiable {
+    case automatic, cloud, device
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .automatic: return "Automatico"
+        case .cloud: return SummaryEngine.cloud.label
+        case .device: return SummaryEngine.device.label
+        }
+    }
 }

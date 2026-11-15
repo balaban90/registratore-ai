@@ -7,11 +7,14 @@ packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio.git
     from: 0.12.0
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit.git
+    from: 0.9.0
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.10.0"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "0.11.0"
+    CURRENT_PROJECT_VERSION: "11"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
@@ -24,6 +27,8 @@ targets:
     dependencies:
       - package: FluidAudio
         product: FluidAudio
+      - package: WhisperKit
+        product: WhisperKit
     info:
       path: RegistratoreAI/Info.plist
       properties:

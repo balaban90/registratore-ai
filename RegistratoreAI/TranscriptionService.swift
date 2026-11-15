@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Speech
+import WhisperKit
 
 enum TranscriptionFailure: LocalizedError {
     case languageNotSupported
@@ -46,11 +47,92 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
     }
 }
 
-/// Trascrizione interamente sul dispositivo con SpeechAnalyzer (iOS 26).
+/// Motore di trascrizione. Entrambi lavorano sul dispositivo: l'audio non esce mai dall'iPhone.
+enum TranscriptionEngine: String, CaseIterable, Identifiable {
+    /// Riconoscimento vocale di Apple: veloce, nessun download aggiuntivo.
+    case fast
+    /// Whisper Large v3 Turbo (WhisperKit): più preciso sul parlato colloquiale, più lento.
+    case accurate
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fast: return "Veloce"
+        case .accurate: return "Preciso"
+        }
+    }
+
+    static let defaultsKey = "transcriptionEngine"
+
+    static var current: TranscriptionEngine {
+        TranscriptionEngine(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .fast
+    }
+}
+
 enum TranscriptionService {
     static var requestedLocale: Locale { Locale(identifier: TranscriptionLanguage.current.rawValue) }
 
-    static func transcribe(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
+    static func transcribe(url: URL, engine: TranscriptionEngine = .current,
+                           progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
+        switch engine {
+        case .fast: return try await transcribeWithApple(url: url, progress: progress)
+        case .accurate: return try await transcribeWithWhisper(url: url, progress: progress)
+        }
+    }
+
+    // MARK: - Whisper
+
+    /// Variante compressa di Whisper Large v3 Turbo (circa 630 MB), adatta all'iPhone.
+    static let whisperModel = "openai_whisper-large-v3-v20240930_turbo_632MB"
+    private static var whisper: WhisperKit?
+
+    private static func transcribeWithWhisper(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
+        let pipe: WhisperKit
+        if let whisper {
+            pipe = whisper
+        } else {
+            await progress("Preparo il motore Preciso (la prima volta scarica circa 630 MB)…")
+            let config = WhisperKitConfig(model: whisperModel)
+            pipe = try await WhisperKit(config)
+            whisper = pipe
+        }
+
+        var options = DecodingOptions()
+        options.task = .transcribe
+        options.language = String(TranscriptionLanguage.current.rawValue.prefix(2))
+        options.temperature = 0
+        options.skipSpecialTokens = true
+        options.wordTimestamps = true
+        options.chunkingStrategy = .vad
+
+        await progress("Trascrivo con il motore Preciso (può richiedere qualche minuto)…")
+        let results = try await pipe.transcribe(audioPath: url.path, decodeOptions: options)
+
+        var segments: [TranscriptSegment] = []
+        for result in results {
+            for seg in result.segments {
+                let words = (seg.words ?? []).map {
+                    TranscriptWord(text: $0.word, start: Double($0.start), end: Double($0.end),
+                                   confidence: Double($0.probability))
+                }
+                if let segment = TranscriptSegment.make(from: words) {
+                    segments.append(segment)
+                } else {
+                    let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { continue }
+                    segments.append(TranscriptSegment(start: Double(seg.start), end: Double(seg.end), text: text))
+                }
+            }
+        }
+        segments.sort { $0.start < $1.start }
+        guard !segments.isEmpty else { throw TranscriptionFailure.empty }
+        return segments
+    }
+
+    // MARK: - Apple (SpeechAnalyzer, iOS 26)
+
+    private static func transcribeWithApple(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
         await progress("Preparo il riconoscimento vocale…")
 
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
