@@ -79,6 +79,7 @@ final class WhisperModel: ObservableObject {
         downloadProgress = 0
         lastError = nil
         Self.isDownloading = true
+        DiagnosticLog.info(.whisper, "Inizio download del modello Preciso")
 
         let download = Task {
             try FileManager.default.createDirectory(at: Self.base, withIntermediateDirectories: true)
@@ -111,8 +112,14 @@ final class WhisperModel: ObservableObject {
         Task {
             do {
                 try await download.value
+                DiagnosticLog.info(.whisper, "Download completato · pronto: \(Self.isReady ? "sì" : "no")")
             } catch {
                 lastError = download.isCancelled ? "Download fermo: riproverà più tardi." : error.localizedDescription
+                if download.isCancelled {
+                    DiagnosticLog.warning(.whisper, "Download fermo da 3 minuti al \(Int((downloadProgress ?? 0) * 100))%: interrotto")
+                } else {
+                    DiagnosticLog.error(.whisper, "Download fallito al \(Int((downloadProgress ?? 0) * 100))%", error)
+                }
             }
             watchdog.cancel()
             Self.isDownloading = false

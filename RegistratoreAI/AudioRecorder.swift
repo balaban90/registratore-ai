@@ -94,8 +94,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         do {
             try session.setPreferredInput(port)
             statusMessage = nil
+            DiagnosticLog.info(.recording, "Microfono scelto: \(port.portName) (\(port.portType.rawValue))")
         } catch {
             statusMessage = "Non riesco a usare \(port.portName): \(error.localizedDescription)"
+            DiagnosticLog.error(.recording, "Impossibile usare \(port.portName)", error)
         }
         refreshInputs()
     }
@@ -114,6 +116,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             refreshInputs()
             return
         }
+        let route = session.currentRoute.inputs.map { "\($0.portName) (\($0.portType.rawValue))" }.joined(separator: ", ")
+        DiagnosticLog.info(.recording, "Cambio percorso audio, motivo \(rawReason) · ingresso: \(route.isEmpty ? "nessuno" : route)\(isRecording ? " · durante la registrazione" : "")")
         switch reason {
         case .newDeviceAvailable:
             if autoSwitchToExternal, let ext = externalPort() {
@@ -136,6 +140,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         switch type {
         case .began:
             // iOS mette in pausa il registratore (es. chiamata in arrivo).
+            DiagnosticLog.warning(.recording, "Interruzione iniziata a \(formatTime(elapsed))")
             isPaused = true
             statusMessage = "In pausa per una chiamata o un'altra app"
             LiveActivityManager.shared.recordingPaused(elapsed: elapsed)
@@ -145,9 +150,11 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
                 recorder?.record()
                 isPaused = false
                 statusMessage = "Registrazione ripresa"
+                DiagnosticLog.info(.recording, "Ripresa dopo l'interruzione")
                 LiveActivityManager.shared.recordingResumed(elapsed: elapsed)
             } catch {
                 statusMessage = "Tocca Riprendi per continuare"
+                DiagnosticLog.error(.recording, "Ripresa automatica non riuscita", error)
             }
         @unknown default:
             break
@@ -160,6 +167,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         let granted = await AVAudioApplication.requestRecordPermission()
         guard granted else {
             permissionDenied = true
+            DiagnosticLog.warning(.recording, "Permesso microfono negato")
             return
         }
         do {
@@ -182,6 +190,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             rec.isMeteringEnabled = true
             guard rec.record() else {
                 statusMessage = "Impossibile avviare la registrazione"
+                DiagnosticLog.error(.recording, "record() ha restituito false")
                 return
             }
             recorder = rec
@@ -194,8 +203,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             statusMessage = nil
             startTimer()
             LiveActivityManager.shared.recordingStarted(title: "Nuova registrazione")
+            DiagnosticLog.info(.recording, "Avviata · ingresso \(currentInputName) · \(Int(session.sampleRate)) Hz · ingressi disponibili \(inputs.count)")
         } catch {
             statusMessage = "Errore: \(error.localizedDescription)"
+            DiagnosticLog.error(.recording, "Avvio non riuscito", error)
         }
     }
 
@@ -224,6 +235,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         guard let recorder, let fileName else { return nil }
         let duration = recorder.currentTime
         recorder.stop()
+        DiagnosticLog.info(.recording, "Fermata · durata \(formatTime(max(duration, elapsed))) · segnalibri \(highlights.count) · file \(DiagnosticLog.fileSize(Storage.url(for: fileName)))")
         timer?.invalidate()
         timer = nil
         self.recorder = nil
@@ -241,6 +253,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     func discard() {
         if let result = stop() {
             Storage.delete(fileName: result.fileName)
+            DiagnosticLog.info(.recording, "Registrazione annullata dall'utente")
         }
         LiveActivityManager.shared.recordingDiscarded()
     }
@@ -268,6 +281,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
 
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
         let message = error?.localizedDescription ?? "errore sconosciuto"
+        DiagnosticLog.error(.recording, "Errore di codifica: \(message)")
         Task { @MainActor in self.statusMessage = "Errore di registrazione: \(message)" }
     }
 }

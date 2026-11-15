@@ -93,8 +93,10 @@ enum TranscriptionService {
             do {
                 return try await transcribeWithWhisper(url: url, progress: progress)
             } catch let error as TranscriptionFailure {
+                DiagnosticLog.error(.whisper, "Trascrizione Preciso fallita", error)
                 throw error
             } catch {
+                DiagnosticLog.error(.whisper, "Motore Preciso non utilizzabile, passo a Veloce", error)
                 // Modello incompleto o danneggiato: lo cancella (verrà riscaricato con il Wi-Fi)
                 // e completa comunque la trascrizione con il motore Veloce.
                 whisper = nil
@@ -102,6 +104,7 @@ enum TranscriptionService {
                 let text = String(describing: error)
                 if text.contains("mlmodelc") || text.contains("weight.bin") || !WhisperModel.isReady {
                     WhisperModel.discard()
+                    DiagnosticLog.warning(.whisper, "Modello Preciso cancellato: verrà riscaricato")
                 }
                 await progress("Il motore Preciso non è disponibile: uso il motore Veloce…")
                 return try await transcribeWithApple(url: url, progress: progress)

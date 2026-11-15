@@ -3,6 +3,7 @@ import SwiftData
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @AppStorage(ClaudeService.summaryModelKey) private var summaryModelRaw = ClaudeModel.sonnet.rawValue
     @AppStorage(ClaudeService.chatModelKey) private var chatModelRaw = ClaudeModel.haiku.rawValue
     @AppStorage(TranscriptionLanguage.defaultsKey) private var languageRaw = TranscriptionLanguage.italian.rawValue
@@ -16,6 +17,9 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var testOK = false
+    @State private var report: DiagnosticReport?
+    @State private var logSize = DiagnosticLog.sizeDescription
+    @State private var confirmClear = false
 
     var body: some View {
         NavigationStack {
@@ -133,6 +137,22 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Button {
+                        if let url = DiagnosticLog.makeReport(context: context) {
+                            report = DiagnosticReport(url: url)
+                        }
+                    } label: {
+                        Label("Esporta file diagnostico", systemImage: "stethoscope")
+                    }
+                    Button("Cancella registro", role: .destructive) { confirmClear = true }
+                    LabeledContent("Dimensione registro", value: logSize)
+                } header: {
+                    Text("Diagnostica")
+                } footer: {
+                    Text("Crea un file di testo con le impostazioni, lo stato delle ultime registrazioni e il registro delle attività, utile per segnalare un problema. Non contiene audio, testi o la chiave API.")
+                }
+
                 Section("Informazioni") {
                     LabeledContent("Versione", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                     if let message = SummaryService.availabilityMessage {
@@ -144,6 +164,16 @@ struct SettingsView: View {
                 }
             }
             .tint(Theme.accent)
+            .sheet(item: $report) { item in
+                ActivityView(items: [item.url])
+            }
+            .confirmationDialog("Cancellare il registro diagnostico?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Cancella", role: .destructive) {
+                    DiagnosticLog.clear()
+                    logSize = DiagnosticLog.sizeDescription
+                }
+            }
+            .onAppear { logSize = DiagnosticLog.sizeDescription }
             .navigationTitle("Impostazioni")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -365,4 +395,9 @@ struct TemplateEditorView: View {
         try? context.save()
         dismiss()
     }
+}
+
+struct DiagnosticReport: Identifiable {
+    let id = UUID()
+    let url: URL
 }

@@ -190,18 +190,38 @@ enum ClaudeService {
             RequestBody(model: model.rawValue, max_tokens: maxTokens, system: system, messages: messages)
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let started = Date.now
+        let sentBytes = request.httpBody?.count ?? 0
+        let result: (Data, URLResponse)
+        do {
+            result = try await URLSession.shared.data(for: request)
+        } catch {
+            DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) dopo \(Int(Date.now.timeIntervalSince(started))) s, inviati \(sentBytes) byte", error)
+            throw error
+        }
+        let (data, response) = result
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error.message
                 ?? String(data: data, encoding: .utf8) ?? ""
+            DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) rifiutata: HTTP \(status) — \(message.prefix(400))")
             throw ClaudeFailure.http(status, message)
         }
-        let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
+        let decoded: ResponseBody
+        do {
+            decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
+        } catch {
+            DiagnosticLog.error(.ai, "Risposta \(model.rawValue) non leggibile (\(data.count) byte)", error)
+            throw error
+        }
         let text = decoded.content.compactMap { $0.type == "text" ? $0.text : nil }.joined(separator: "\n")
-        guard !text.isEmpty else { throw ClaudeFailure.emptyResponse }
+        guard !text.isEmpty else {
+            DiagnosticLog.error(.ai, "Risposta \(model.rawValue) vuota · stop \(decoded.stop_reason ?? "?")")
+            throw ClaudeFailure.emptyResponse
+        }
         let cost = decoded.usage?.cost(for: model) ?? 0
         UsageTracker.add(cost)
+        DiagnosticLog.info(.ai, "Richiesta \(model.rawValue) ok in \(String(format: "%.1f", Date.now.timeIntervalSince(started))) s · inviati \(sentBytes) byte · risposta \(text.count) caratteri · costo \(String(format: "%.4f", cost)) USD · stop \(decoded.stop_reason ?? "?")")
         return ClaudeReply(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                            costUSD: cost,
                            truncated: decoded.stop_reason == "max_tokens")

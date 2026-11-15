@@ -80,6 +80,9 @@ final class Pipeline: ObservableObject {
         subjects[id] = recording
         fractions[id] = 0
         BackgroundWork.shared.begin(title: "Registratore AI")
+        let tag = id.uuidString.prefix(8)
+        let started = Date.now
+        DiagnosticLog.info(.pipeline, "\(tag) inizio lavorazione · durata audio \(formatTime(recording.duration)) · file \(DiagnosticLog.fileSize(recording.audioURL))")
         tasks[id] = Task {
             var success = true
             do {
@@ -87,7 +90,9 @@ final class Pipeline: ObservableObject {
             } catch {
                 success = false
                 errors[id] = Self.readable(error)
+                DiagnosticLog.error(.pipeline, "\(tag) lavorazione interrotta", error)
             }
+            DiagnosticLog.info(.pipeline, "\(tag) fine lavorazione (\(success ? "ok" : "con errori")) in \(Int(Date.now.timeIntervalSince(started))) s")
             recording.pipelinePending = false
             try? context.save()
             status[id] = nil
@@ -112,6 +117,7 @@ final class Pipeline: ObservableObject {
     }
 
     private func report(_ id: UUID, _ text: String) {
+        if status[id] != text { DiagnosticLog.info(.pipeline, "\(id.uuidString.prefix(8)) \(text)") }
         status[id] = text
         if let f = Self.fraction(for: text) { fractions[id] = max(fractions[id] ?? 0, f) }
         let f = fractions[id] ?? 0
@@ -139,6 +145,9 @@ final class Pipeline: ObservableObject {
     private func transcribe(_ recording: Recording, in context: ModelContext) async throws {
         let id = recording.id
         say(recording, "Trascrivo…")
+        let engine = TranscriptionEngine.current
+        let started = Date.now
+        DiagnosticLog.info(.transcription, "Motore richiesto \(engine.rawValue) → \(engine.resolved.rawValue) · lingua \(TranscriptionLanguage.current.rawValue)")
         do {
             let segments = try await TranscriptionService.transcribe(url: recording.audioURL) { [weak self] message in
                 self?.report(id, message)
@@ -152,7 +161,11 @@ final class Pipeline: ObservableObject {
             recording.transcript = recording.plainTranscript
             recording.transcriptionError = nil
             try? context.save()
+            let words = recording.transcript?.split(separator: " ").count ?? 0
+            let uncertain = segments.reduce(0) { $0 + ($1.uncertain?.count ?? 0) }
+            DiagnosticLog.info(.transcription, "Completata in \(Int(Date.now.timeIntervalSince(started))) s · \(segments.count) frasi · \(words) parole · \(uncertain) parole incerte")
         } catch {
+            DiagnosticLog.error(.transcription, "Fallita dopo \(Int(Date.now.timeIntervalSince(started))) s", error)
             recording.transcriptionError = Self.readable(error)
             try? context.save()
             throw error
@@ -166,9 +179,11 @@ final class Pipeline: ObservableObject {
         let profiles = (try? context.fetch(FetchDescriptor<VoiceProfile>())) ?? []
         let known = profiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
         let profileNames = Dictionary(profiles.map { ($0.speakerKey, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let started = Date.now
         let turns = try await DiarizationService.diarize(url: recording.audioURL, known: known) { [weak self] message in
             self?.report(id, message)
         }
+        DiagnosticLog.info(.speakers, "\(turns.count) turni · \(Set(turns.map(\.speakerId)).count) voci · profili noti \(known.count) · \(Int(Date.now.timeIntervalSince(started))) s")
         let entries = glossary(context)
         recording.segments = Glossary.apply(entries, to: DiarizationService.assign(turns, to: recording.segments))
         if recording.revisedByClaude {
@@ -230,17 +245,24 @@ final class Pipeline: ObservableObject {
         if recording.hasDefaultTitle, let title = result.title, !title.isEmpty {
             recording.title = title
         }
+        DiagnosticLog.info(.ai, "Miglioramento: \(base.count) frasi → \(revised.count) · nomi proposti \(proposals.count)")
         recording.revisedByClaude = true
         recording.transcript = recording.plainTranscript
         try? context.save()
     }
 
     private func diarizeQuietly(_ recording: Recording, in context: ModelContext) async {
-        do { try await diarize(recording, in: context) } catch { errors[recording.id] = "Parlanti: \(Self.readable(error))" }
+        do { try await diarize(recording, in: context) } catch {
+            DiagnosticLog.error(.speakers, "Separazione parlanti fallita", error)
+            errors[recording.id] = "Parlanti: \(Self.readable(error))"
+        }
     }
 
     private func improveQuietly(_ recording: Recording, in context: ModelContext, applyNames: Bool) async {
-        do { try await revise(recording, in: context, applyNames: applyNames) } catch { errors[recording.id] = "Miglioramento AI: \(Self.readable(error))" }
+        do { try await revise(recording, in: context, applyNames: applyNames) } catch {
+            DiagnosticLog.error(.ai, "Miglioramento fallito", error)
+            errors[recording.id] = "Miglioramento AI: \(Self.readable(error))"
+        }
     }
 
     /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile, con l'AI avanzata.
@@ -257,6 +279,7 @@ final class Pipeline: ObservableObject {
                 summary.recording = recording
                 context.insert(summary)
             } else if ClaudeService.isConfigured {
+                DiagnosticLog.info(.onDevice, "AI sul dispositivo non disponibile (\(SummaryService.availabilityMessage ?? "?")): sintesi con AI avanzata")
                 let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript, template: template)
                 let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
                 summary.recording = recording
@@ -264,6 +287,7 @@ final class Pipeline: ObservableObject {
             }
             try? context.save()
         } catch {
+            DiagnosticLog.error(.onDevice, "Sintesi veloce fallita", error)
             errors[id] = "Sintesi: \(Self.readable(error))"
         }
     }
