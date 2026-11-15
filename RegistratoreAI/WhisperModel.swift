@@ -38,11 +38,22 @@ final class WhisperModel: ObservableObject {
         base.appending(path: "models/\(repo)/\(variant)")
     }
 
+    /// true mentre il modello si sta scaricando: in quel momento non va usato.
+    nonisolated(unsafe) static var isDownloading = false
+
+    /// Pronto solo se ci sono davvero tutti i file pesanti (non solo le cartelle) e non è in corso un download.
     nonisolated static var isReady: Bool {
+        guard !isDownloading else { return false }
         let fm = FileManager.default
-        return ["AudioEncoder.mlmodelc", "TextDecoder.mlmodelc", "MelSpectrogram.mlmodelc"].allSatisfy {
-            fm.fileExists(atPath: folder.appending(component: $0).path)
-        }
+        let required = ["AudioEncoder.mlmodelc", "TextDecoder.mlmodelc", "MelSpectrogram.mlmodelc"].flatMap {
+            ["\($0)/coremldata.bin", "\($0)/weights/weight.bin"]
+        } + ["config.json"]
+        return required.allSatisfy { fm.fileExists(atPath: folder.appending(path: $0).path) }
+    }
+
+    /// Cancella un modello danneggiato o incompleto: verrà riscaricato con il Wi-Fi.
+    nonisolated static func discard() {
+        try? FileManager.default.removeItem(at: folder)
     }
 
     private init() {
@@ -64,6 +75,7 @@ final class WhisperModel: ObservableObject {
         guard !Self.isReady, downloadProgress == nil, NetworkStatus.shared.isUnmetered else { return }
         downloadProgress = 0
         lastError = nil
+        Self.isDownloading = true
         Task {
             do {
                 try FileManager.default.createDirectory(at: Self.base, withIntermediateDirectories: true)
@@ -78,6 +90,7 @@ final class WhisperModel: ObservableObject {
             } catch {
                 lastError = error.localizedDescription
             }
+            Self.isDownloading = false
             downloadProgress = nil
         }
     }

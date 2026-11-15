@@ -77,7 +77,7 @@ final class Pipeline: ObservableObject {
             do {
                 try await work()
             } catch {
-                errors[id] = error.localizedDescription
+                errors[id] = Self.readable(error)
             }
             status[id] = nil
             tasks[id] = nil
@@ -86,6 +86,13 @@ final class Pipeline: ObservableObject {
     }
 
     private func say(_ recording: Recording, _ text: String) { status[recording.id] = text }
+
+    /// Messaggio comprensibile: i dettagli tecnici lunghi (percorsi di file, codici) non servono all'utente.
+    static func readable(_ error: Error) -> String {
+        let text = error.localizedDescription
+        if text.count <= 160 && !text.contains("/private/") && !text.contains("/var/") { return text }
+        return "Si è verificato un problema tecnico. Riprova con ⋯ > Rifai la trascrizione."
+    }
 
     // MARK: - Passaggi
 
@@ -110,7 +117,7 @@ final class Pipeline: ObservableObject {
             recording.transcriptionError = nil
             try? context.save()
         } catch {
-            recording.transcriptionError = error.localizedDescription
+            recording.transcriptionError = Self.readable(error)
             try? context.save()
             throw error
         }
@@ -193,11 +200,11 @@ final class Pipeline: ObservableObject {
     }
 
     private func diarizeQuietly(_ recording: Recording, in context: ModelContext) async {
-        do { try await diarize(recording, in: context) } catch { errors[recording.id] = "Parlanti: \(error.localizedDescription)" }
+        do { try await diarize(recording, in: context) } catch { errors[recording.id] = "Parlanti: \(Self.readable(error))" }
     }
 
     private func improveQuietly(_ recording: Recording, in context: ModelContext, applyNames: Bool) async {
-        do { try await revise(recording, in: context, applyNames: applyNames) } catch { errors[recording.id] = "Miglioramento AI: \(error.localizedDescription)" }
+        do { try await revise(recording, in: context, applyNames: applyNames) } catch { errors[recording.id] = "Miglioramento AI: \(Self.readable(error))" }
     }
 
     /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile, con l'AI avanzata.
@@ -221,7 +228,7 @@ final class Pipeline: ObservableObject {
             }
             try? context.save()
         } catch {
-            errors[id] = "Sintesi: \(error.localizedDescription)"
+            errors[id] = "Sintesi: \(Self.readable(error))"
         }
     }
 

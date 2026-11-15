@@ -85,8 +85,21 @@ enum TranscriptionService {
     static func transcribe(url: URL, engine: TranscriptionEngine = .current,
                            progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
         switch engine.resolved {
-        case .accurate: return try await transcribeWithWhisper(url: url, progress: progress)
-        default: return try await transcribeWithApple(url: url, progress: progress)
+        case .accurate:
+            do {
+                return try await transcribeWithWhisper(url: url, progress: progress)
+            } catch let error as TranscriptionFailure {
+                throw error
+            } catch {
+                // Modello incompleto o danneggiato: lo cancella (verrà riscaricato con il Wi-Fi)
+                // e completa comunque la trascrizione con il motore Veloce.
+                whisper = nil
+                WhisperModel.discard()
+                await progress("Il motore Preciso non è disponibile: uso il motore Veloce…")
+                return try await transcribeWithApple(url: url, progress: progress)
+            }
+        default:
+            return try await transcribeWithApple(url: url, progress: progress)
         }
     }
 
