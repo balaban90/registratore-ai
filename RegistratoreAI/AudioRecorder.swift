@@ -203,6 +203,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             statusMessage = nil
             startTimer()
             LiveActivityManager.shared.recordingStarted(title: "Nuova registrazione")
+            TranscriptionService.prewarm()
             DiagnosticLog.info(.recording, "Avviata · ingresso \(currentInputName) · \(Int(session.sampleRate)) Hz · ingressi disponibili \(inputs.count)")
         } catch {
             statusMessage = "Errore: \(error.localizedDescription)"

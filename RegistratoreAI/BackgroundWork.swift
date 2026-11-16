@@ -17,6 +17,21 @@ final class BackgroundWork {
     private var title = "Registratore AI"
     private var subtitle = ""
     private var fraction = 0.0
+    /// Avanzamento mostrato a iOS (0…1000): sale piano anche durante i passaggi lunghi,
+    /// perché iOS può fermare un lavoro che per molto tempo non segnala progressi.
+    private var shown: Int64 = 0
+    private var heartbeat: Timer?
+    private var lastBeat = Date.now
+    private var observer: NSObjectProtocol?
+
+    private init() {
+        // Il battito si ferma quando iOS sospende l'app: al rientro, un buco lungo
+        // significa che la lavorazione è rimasta ferma. Lo annota nel registro.
+        observer = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                                          object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { BackgroundWork.shared.checkSuspension() }
+        }
+    }
 
     func begin(title: String) {
         active += 1
@@ -24,6 +39,8 @@ final class BackgroundWork {
         self.title = title
         subtitle = "Avvio…"
         fraction = 0
+        shown = 0
+        startHeartbeat()
 
         shortTask = UIApplication.shared.beginBackgroundTask(withName: "lavorazione") { [weak self] in
             MainActor.assumeIsolated { self?.endShortTask() }
@@ -40,43 +57,88 @@ final class BackgroundWork {
                 self.attach(continued)
             }
         }
-        guard registered else { return }
+        guard registered else {
+            DiagnosticLog.warning(.pipeline, "Lavoro in background non registrato da iOS")
+            return
+        }
         let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: title, subtitle: subtitle)
         request.strategy = .fail
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            DiagnosticLog.warning(.pipeline, "iOS ha rifiutato il lavoro in background: \(DiagnosticLog.describe(error))")
+        }
     }
 
     func update(_ text: String, fraction: Double) {
         subtitle = text
         self.fraction = max(self.fraction, min(fraction, 1))
+        shown = max(shown, Int64(self.fraction * 1000))
         guard let task else { return }
         task.updateTitle(title, subtitle: text)
-        task.progress.completedUnitCount = Int64(self.fraction * 100)
+        task.progress.completedUnitCount = shown
     }
 
     func end(success: Bool) {
         active = max(0, active - 1)
         guard active == 0 else { return }
         if let task {
-            task.progress.completedUnitCount = 100
+            task.progress.completedUnitCount = 1000
             task.setTaskCompleted(success: success)
         }
         task = nil
+        stopHeartbeat()
         endShortTask()
     }
 
     private func attach(_ continued: BGContinuedProcessingTask) {
         task = continued
-        continued.progress.totalUnitCount = 100
-        continued.progress.completedUnitCount = Int64(fraction * 100)
+        DiagnosticLog.info(.pipeline, "Lavoro in background concesso da iOS")
+        continued.progress.totalUnitCount = 1000
+        continued.progress.completedUnitCount = shown
         continued.updateTitle(title, subtitle: subtitle)
         continued.expirationHandler = { [weak self] in
             // iOS ha chiesto di fermarsi: la lavorazione riprenderà alla riapertura dell'app.
+            DiagnosticLog.warning(.pipeline, "iOS ha interrotto il lavoro in background")
             Task { @MainActor in
                 self?.task?.setTaskCompleted(success: false)
                 self?.task = nil
             }
         }
+    }
+
+    // MARK: - Battito
+
+    private func startHeartbeat() {
+        heartbeat?.invalidate()
+        lastBeat = .now
+        heartbeat = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+            MainActor.assumeIsolated { BackgroundWork.shared.beat() }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeat?.invalidate()
+        heartbeat = nil
+    }
+
+    /// Fa avanzare di poco la barra di iOS, senza mai superare la fase successiva.
+    private func beat() {
+        lastBeat = .now
+        guard active > 0 else { return }
+        let ceiling = min(Int64(fraction * 1000) + 280, 990)
+        if shown < ceiling { shown += 1 }
+        task?.progress.completedUnitCount = shown
+    }
+
+    private func checkSuspension() {
+        guard active > 0, heartbeat != nil else { return }
+        let gap = Int(Date.now.timeIntervalSince(lastBeat))
+        lastBeat = .now
+        guard gap > 30 else { return }
+        DiagnosticLog.warning(.pipeline, "Lavorazione rimasta ferma \(gap) s mentre l'app era in background (\(subtitle))")
+        DiagnosticUploader.markPending()
+        DiagnosticUploader.shared.sendIfNeeded(reason: "lavorazione ferma in background")
     }
 
     private func endShortTask() {

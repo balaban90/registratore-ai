@@ -1,1 +1,1 @@
-Il tasto "Scarica" apre la pagina della nuova versione, da installare dal Mac con Sideloadly.
+La trascrizione non resta più ferma a schermo bloccato: il motore Preciso si prepara già mentre registri, così a fine registrazione parte subito. Se iOS dovesse comunque fermarla, l'app lo segnala in automatico per la correzione.

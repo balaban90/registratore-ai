@@ -99,7 +99,7 @@ enum TranscriptionService {
                 DiagnosticLog.error(.whisper, "Motore Preciso non utilizzabile, passo a Veloce", error)
                 // Modello incompleto o danneggiato: lo cancella (verrà riscaricato con il Wi-Fi)
                 // e completa comunque la trascrizione con il motore Veloce.
-                whisper = nil
+                await MainActor.run { whisper = nil }
                 // Cancella il modello solo se i suoi file risultano danneggiati o mancanti.
                 let text = String(describing: error)
                 if text.contains("mlmodelc") || text.contains("weight.bin") || !WhisperModel.isReady {
@@ -116,24 +116,50 @@ enum TranscriptionService {
 
     // MARK: - Whisper
 
-    private static var whisper: WhisperKit?
+    @MainActor private static var whisper: WhisperKit?
+    @MainActor private static var loading: Task<WhisperKit, Error>?
+
+    /// Prepara il motore Preciso mentre si registra: l'app in quel momento è attiva
+    /// (anche a schermo bloccato), così a fine registrazione la trascrizione parte subito.
+    @MainActor
+    static func prewarm() {
+        guard TranscriptionEngine.current.resolved == .accurate, whisper == nil, loading == nil else { return }
+        Task { @MainActor in
+            let started = Date.now
+            do {
+                _ = try await loadWhisper()
+                DiagnosticLog.info(.whisper, "Motore Preciso preparato in anticipo in \(Int(Date.now.timeIntervalSince(started))) s")
+            } catch {
+                DiagnosticLog.warning(.whisper, "Preparazione anticipata non riuscita: \(DiagnosticLog.describe(error))")
+            }
+        }
+    }
+
+    @MainActor
+    private static func loadWhisper() async throws -> WhisperKit {
+        if let whisper { return whisper }
+        if let loading { return try await loading.value }
+        // Niente GPU: in background iOS non la concede. Lo spettrogramma va sulla CPU (è leggero),
+        // il resto sul Neural Engine.
+        let compute = ModelComputeOptions(melCompute: .cpuOnly, audioEncoderCompute: .cpuAndNeuralEngine,
+                                          textDecoderCompute: .cpuAndNeuralEngine)
+        let config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
+                                      modelFolder: WhisperModel.folder.path, tokenizerFolder: WhisperModel.base,
+                                      computeOptions: compute, download: false)
+        let task = Task.detached(priority: .userInitiated) { try await WhisperKit(config) }
+        loading = task
+        defer { loading = nil }
+        let pipe = try await task.value
+        whisper = pipe
+        return pipe
+    }
 
     private static func transcribeWithWhisper(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
-        let pipe: WhisperKit
-        if let whisper {
-            pipe = whisper
-        } else {
-            await progress("Preparo il motore Preciso…")
-            // Niente GPU: in background iOS non la concede. Lo spettrogramma va sulla CPU (è leggero),
-            // il resto sul Neural Engine.
-            let compute = ModelComputeOptions(melCompute: .cpuOnly, audioEncoderCompute: .cpuAndNeuralEngine,
-                                              textDecoderCompute: .cpuAndNeuralEngine)
-            let config = WhisperKitConfig(model: WhisperModel.variant, downloadBase: WhisperModel.base,
-                                          modelFolder: WhisperModel.folder.path, tokenizerFolder: WhisperModel.base,
-                                          computeOptions: compute, download: false)
-            pipe = try await WhisperKit(config)
-            whisper = pipe
-        }
+        let ready = await MainActor.run { whisper != nil }
+        if !ready { await progress("Preparo il motore Preciso…") }
+        let started = Date.now
+        let pipe = try await loadWhisper()
+        if !ready { DiagnosticLog.info(.whisper, "Motore Preciso pronto in \(Int(Date.now.timeIntervalSince(started))) s") }
 
         var options = DecodingOptions()
         options.task = .transcribe
