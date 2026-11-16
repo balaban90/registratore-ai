@@ -49,9 +49,9 @@ final class LongRecordingUITests: XCTestCase {
 
     private func open(_ title: String) -> Double {
         let cell = app.staticTexts[title].firstMatch
-        if !cell.isHittable {
-            for _ in 0..<8 where !cell.isHittable { app.swipeUp() }
-        }
+        // Riporta in vista la registrazione, sopra o sotto nell'elenco.
+        for _ in 0..<10 where !(cell.exists && cell.isHittable) { app.swipeDown() }
+        for _ in 0..<10 where !(cell.exists && cell.isHittable) { app.swipeUp() }
         return time("Apertura «\(title)»") {
             cell.tap()
             XCTAssertTrue(app.buttons["Trascrizione"].waitForExistence(timeout: 20))
