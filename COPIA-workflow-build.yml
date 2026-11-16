@@ -138,7 +138,7 @@ jobs:
           echo "== Tempi misurati =="
           grep -E "^(TEMPO|CONFRONTO)|Riproduzione: dalla|Sintesi di [0-9]+ caratteri|Lavorazione ancora" prove.log || true
           grep -E "^CONFRONTO|Riproduzione: dalla" prove.log | while IFS= read -r line; do echo "::notice::${line}"; done || true
-          { grep -E "error: |: error:|failed \(" prove.log || true; } | grep -v "^ld: warning" | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
+          { grep -E "error: |: error:|failed \(" prove.log | grep -v "^ld: warning" || true; } | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
           if ! grep -q "\*\* TEST SUCCEEDED \*\*" prove.log; then
             tail -40 prove.log | while IFS= read -r line; do echo "::warning::${line}"; done
             exit 1
