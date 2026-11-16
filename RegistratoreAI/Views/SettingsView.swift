@@ -28,6 +28,17 @@ struct SettingsView: View {
     @State private var githubMessage: String?
     @State private var problemNote = ""
 
+    /// Opzioni tecniche nascoste: si attivano toccando 7 volte "Versione", come su iPhone.
+    @AppStorage(SettingsView.developerModeKey) private var developerMode = false
+    @State private var versionTaps = 0
+    @State private var developerNotice: String?
+
+    static let developerModeKey = "developerMode"
+
+    private var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -43,88 +54,7 @@ struct SettingsView: View {
                     Text("Lingua parlata nelle registrazioni.")
                 }
 
-                Section {
-                    if hasKey {
-                        Label("Chiave API attiva", systemImage: "checkmark.seal.fill")
-                            .foregroundStyle(.green)
-                        Button("Verifica") { testSaved() }
-                            .disabled(testing)
-                        Button("Rimuovi chiave", role: .destructive) {
-                            Keychain.delete(ClaudeService.keychainKey)
-                            hasKey = false
-                            testResult = nil
-                        }
-                    } else {
-                        SecureField("Chiave API", text: $keyInput)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Button("Salva") { saveAndTest() }
-                            .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty || testing)
-                    }
-                    if testing {
-                        HStack { ProgressView(); Text("Verifico…") }
-                    }
-                    if let testResult {
-                        Text(testResult)
-                            .font(.footnote)
-                            .foregroundStyle(testOK ? .green : .red)
-                    }
-                } header: {
-                    Text("AI avanzata")
-                } footer: {
-                    Text("La chiave è salvata nel Portachiavi di questo iPhone. Viene inviato solo il testo della trascrizione, mai l'audio.")
-                }
-
-                Section {
-                    Picker("Elaborazioni", selection: $summaryModelRaw) {
-                        ForEach(ClaudeModel.allCases) { model in
-                            Text(model.label).tag(model.rawValue)
-                        }
-                    }
-                    Picker("Domande", selection: $chatModelRaw) {
-                        ForEach(ClaudeModel.allCases) { model in
-                            Text(model.label).tag(model.rawValue)
-                        }
-                    }
-                } header: {
-                    Text("Modello AI")
-                } footer: {
-                    Text("Consigliati: Bilanciato per le elaborazioni, Economico per le domande. Avanzato offre la massima qualità a un costo maggiore.")
-                }
-
-                Section {
-                    Picker("Motore di trascrizione", selection: $engineRaw) {
-                        ForEach(TranscriptionEngine.allCases) { engine in
-                            Text(engine.label).tag(engine.rawValue)
-                        }
-                    }
-                    if let progress = whisper.downloadProgress {
-                        LabeledContent("Motore Preciso", value: "Download \(Int(progress * 100))%")
-                    } else {
-                        LabeledContent("Motore Preciso", value: WhisperModel.isReady ? "Pronto" : "Non scaricato")
-                        if !WhisperModel.isReady && engineRaw != TranscriptionEngine.fast.rawValue {
-                            Button("Scarica ora") { whisper.downloadIfAppropriate() }
-                        }
-                    }
-                    if let error = whisper.lastError {
-                        Text(error).font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Toggle("Migliora con l'AI", isOn: $autoImprove)
-                    Toggle("Sintesi automatica", isOn: $autoSummary)
-                } header: {
-                    Text("Avanzate")
-                } footer: {
-                    Text("Automatico e Preciso usano il motore Preciso quando il suo modello è scaricato (circa 630 MB, solo con Wi-Fi); fino ad allora si usa Veloce. \"Migliora con l'AI\" corregge testo e parlanti dopo ogni trascrizione, se è attiva l'AI avanzata. \"Sintesi automatica\" crea la sintesi usata come anteprima nell'elenco.")
-                }
-
-                Section {
-                    LabeledContent("Spesa stimata", value: formatUSD(UsageTracker.monthTotal))
-                    LabeledContent("Richieste", value: "\(UsageTracker.monthRequests)")
-                } header: {
-                    Text("Consumo del mese")
-                } footer: {
-                    Text("Stima calcolata dall'app. Il saldo effettivo è nel tuo account del provider AI.")
-                }
+                aiKeySection
 
                 Section {
                     NavigationLink {
@@ -142,115 +72,34 @@ struct SettingsView: View {
                     } label: {
                         Label("Voci e parlanti", systemImage: "person.2.wave.2")
                     }
+                } header: {
+                    Text("Personalizza")
                 }
+
+                updatesSection
 
                 Section {
-                    Button {
-                        if let url = DiagnosticLog.makeReport(context: context) {
-                            report = DiagnosticReport(url: url)
-                        }
-                    } label: {
-                        Label("Esporta file diagnostico", systemImage: "stethoscope")
-                    }
-                    Button("Cancella registro", role: .destructive) { confirmClear = true }
-                    LabeledContent("Dimensione registro", value: logSize)
-                } header: {
-                    Text("Diagnostica")
-                } footer: {
-                    Text("Crea un file di testo con le impostazioni, lo stato delle ultime registrazioni e il registro delle attività, utile per segnalare un problema. Non contiene audio, testi o la chiave API.")
-                }
-
-                Section {
-                    if hasGitHubToken {
-                        Toggle("Invio automatico", isOn: $autoUpload)
-                        TextField("Cosa è successo? (facoltativo)", text: $problemNote, axis: .vertical)
-                            .lineLimit(1...4)
-                        Button {
-                            Task {
-                                if await uploader.send(reason: "segnalazione manuale", note: problemNote) { problemNote = "" }
-                            }
+                    LabeledContent("Versione", value: version)
+                        .contentShape(Rectangle())
+                        .onTapGesture { tappedVersion() }
+                        .accessibilityIdentifier("version-row")
+                        .accessibilityAddTraits(.isButton)
+                    if developerMode {
+                        NavigationLink {
+                            developerView
                         } label: {
-                            if uploader.sending {
-                                HStack { ProgressView(); Text("Invio…") }
-                            } else {
-                                Label("Invia segnalazione ora", systemImage: "paperplane")
-                            }
+                            Label("Modalità sviluppatore", systemImage: "hammer")
                         }
-                        .disabled(uploader.sending)
-                        if let last = DiagnosticUploader.lastSent {
-                            LabeledContent("Ultimo invio", value: last.formatted(date: .abbreviated, time: .shortened))
-                        }
-                        Button("Rimuovi token", role: .destructive) {
-                            Keychain.delete(DiagnosticUploader.tokenKey)
-                            hasGitHubToken = false
-                        }
-                    } else {
-                        SecureField("Token GitHub", text: $githubTokenInput)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Button("Salva") { saveGitHubToken() }
-                            .disabled(githubTokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    if let message = githubMessage ?? uploader.lastResult {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("Segnalazione automatica dei problemi")
+                    Text("Informazioni")
                 } footer: {
-                    Text("Quando l'app incontra un errore o un crash, invia il file diagnostico al repository privato \(DiagnosticUploader.repository) per la correzione. Il token è salvato nel Portachiavi.")
-                }
-
-                Section {
-                    if let release = updates.available {
-                        Button {
-                            updates.install(release)
-                        } label: {
-                            Label("Scarica la versione \(release.version)", systemImage: "arrow.down.circle.fill")
-                        }
-                        if !release.notes.isEmpty {
-                            Text(release.notes).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Button {
-                            Task { await updates.check(force: true) }
-                        } label: {
-                            if updates.checking {
-                                HStack { ProgressView(); Text("Controllo…") }
-                            } else {
-                                Label("Controlla aggiornamenti", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                        }
-                    }
-                    if let message = updates.lastMessage {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Aggiornamenti")
-                } footer: {
-                    Text("Le nuove versioni si installano dal Mac con Sideloadly.")
-                }
-
-                Section("Informazioni") {
-                    LabeledContent("Versione", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                    if let message = SummaryService.availabilityMessage {
-                        Text("AI sul dispositivo: \(message)").font(.footnote)
-                    } else {
-                        Label("AI sul dispositivo disponibile", systemImage: "iphone")
-                            .font(.footnote)
+                    if let developerNotice {
+                        Text(developerNotice)
                     }
                 }
             }
             .tint(Theme.accent)
-            .sheet(item: $report) { item in
-                ActivityView(items: [item.url])
-            }
-            .confirmationDialog("Cancellare il registro diagnostico?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Cancella", role: .destructive) {
-                    DiagnosticLog.clear()
-                    logSize = DiagnosticLog.sizeDescription
-                }
-            }
-            .onAppear { logSize = DiagnosticLog.sizeDescription }
             .navigationTitle("Impostazioni")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -259,6 +108,229 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func tappedVersion() {
+        guard !developerMode else {
+            developerNotice = "La modalità sviluppatore è già attiva."
+            return
+        }
+        versionTaps += 1
+        let left = 7 - versionTaps
+        if left <= 0 {
+            developerMode = true
+            versionTaps = 0
+            developerNotice = "Modalità sviluppatore attivata."
+            DiagnosticLog.info(.app, "Modalità sviluppatore attivata")
+        } else if left <= 3 {
+            developerNotice = left == 1 ? "Ancora 1 tocco per la modalità sviluppatore." : "Ancora \(left) tocchi per la modalità sviluppatore."
+        }
+    }
+
+    // MARK: - Sezioni visibili a tutti
+
+    private var aiKeySection: some View {
+        Section {
+            if hasKey {
+                Label("AI avanzata attiva", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Button("Verifica") { testSaved() }
+                    .disabled(testing)
+                Button("Rimuovi chiave", role: .destructive) {
+                    Keychain.delete(ClaudeService.keychainKey)
+                    hasKey = false
+                    testResult = nil
+                }
+            } else {
+                SecureField("Chiave API", text: $keyInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Salva") { saveAndTest() }
+                    .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty || testing)
+            }
+            if testing {
+                HStack { ProgressView(); Text("Verifico…") }
+            }
+            if let testResult {
+                Text(testResult)
+                    .font(.footnote)
+                    .foregroundStyle(testOK ? .green : .red)
+            }
+        } header: {
+            Text("AI avanzata")
+        } footer: {
+            Text("Facoltativa: migliora trascrizioni ed elaborazioni. Viene inviato solo il testo, mai l'audio.")
+        }
+    }
+
+    private var updatesSection: some View {
+        Section {
+            if let release = updates.available {
+                Button {
+                    updates.install(release)
+                } label: {
+                    Label("Scarica la versione \(release.version)", systemImage: "arrow.down.circle.fill")
+                }
+                if !release.notes.isEmpty {
+                    Text(release.notes).font(.footnote).foregroundStyle(.secondary)
+                }
+            } else {
+                Button {
+                    Task { await updates.check(force: true) }
+                } label: {
+                    if updates.checking {
+                        HStack { ProgressView(); Text("Controllo…") }
+                    } else {
+                        Label("Controlla aggiornamenti", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+            }
+            if let message = updates.lastMessage {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Aggiornamenti")
+        }
+    }
+
+    // MARK: - Modalità sviluppatore
+
+    private var developerView: some View {
+        Form {
+            Section {
+                Picker("Elaborazioni", selection: $summaryModelRaw) {
+                    ForEach(ClaudeModel.allCases) { model in
+                        Text(model.label).tag(model.rawValue)
+                    }
+                }
+                Picker("Domande", selection: $chatModelRaw) {
+                    ForEach(ClaudeModel.allCases) { model in
+                        Text(model.label).tag(model.rawValue)
+                    }
+                }
+            } header: {
+                Text("Modello AI")
+            } footer: {
+                Text("Consigliati: Bilanciato per le elaborazioni, Economico per le domande. Avanzato offre la massima qualità a un costo maggiore.")
+            }
+
+            Section {
+                Picker("Motore di trascrizione", selection: $engineRaw) {
+                    ForEach(TranscriptionEngine.allCases) { engine in
+                        Text(engine.label).tag(engine.rawValue)
+                    }
+                }
+                if let progress = whisper.downloadProgress {
+                    LabeledContent("Motore Preciso", value: "Download \(Int(progress * 100))%")
+                } else {
+                    LabeledContent("Motore Preciso", value: WhisperModel.isReady ? "Pronto" : "Non scaricato")
+                    if !WhisperModel.isReady && engineRaw != TranscriptionEngine.fast.rawValue {
+                        Button("Scarica ora") { whisper.downloadIfAppropriate() }
+                    }
+                }
+                if let error = whisper.lastError {
+                    Text(error).font(.footnote).foregroundStyle(.secondary)
+                }
+                Toggle("Migliora con l'AI", isOn: $autoImprove)
+                Toggle("Sintesi automatica", isOn: $autoSummary)
+            } header: {
+                Text("Lavorazione")
+            } footer: {
+                Text("Automatico usa il motore Preciso quando il suo modello è scaricato (circa 630 MB, solo con Wi-Fi), altrimenti Veloce. \"Migliora con l'AI\" corregge testo e parlanti dopo ogni trascrizione. \"Sintesi automatica\" crea l'anteprima mostrata nell'elenco.")
+            }
+
+            Section {
+                LabeledContent("Spesa stimata", value: formatUSD(UsageTracker.monthTotal))
+                LabeledContent("Richieste", value: "\(UsageTracker.monthRequests)")
+                if let message = SummaryService.availabilityMessage {
+                    LabeledContent("AI sul dispositivo", value: message)
+                } else {
+                    LabeledContent("AI sul dispositivo", value: "Disponibile")
+                }
+            } header: {
+                Text("Consumo del mese")
+            } footer: {
+                Text("Stima calcolata dall'app. Il saldo effettivo è nel tuo account del provider AI.")
+            }
+
+            Section {
+                Button {
+                    if let url = DiagnosticLog.makeReport(context: context) {
+                        report = DiagnosticReport(url: url)
+                    }
+                } label: {
+                    Label("Esporta file diagnostico", systemImage: "stethoscope")
+                }
+                Button("Cancella registro", role: .destructive) { confirmClear = true }
+                LabeledContent("Dimensione registro", value: logSize)
+            } header: {
+                Text("Diagnostica")
+            } footer: {
+                Text("File con impostazioni, stato delle registrazioni e registro delle attività. Non contiene audio, testi o la chiave API.")
+            }
+
+            Section {
+                if hasGitHubToken {
+                    Toggle("Invio automatico", isOn: $autoUpload)
+                    TextField("Cosa è successo? (facoltativo)", text: $problemNote, axis: .vertical)
+                        .lineLimit(1...4)
+                    Button {
+                        Task {
+                            if await uploader.send(reason: "segnalazione manuale", note: problemNote) { problemNote = "" }
+                        }
+                    } label: {
+                        if uploader.sending {
+                            HStack { ProgressView(); Text("Invio…") }
+                        } else {
+                            Label("Invia segnalazione ora", systemImage: "paperplane")
+                        }
+                    }
+                    .disabled(uploader.sending)
+                    if let last = DiagnosticUploader.lastSent {
+                        LabeledContent("Ultimo invio", value: last.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    Button("Rimuovi token", role: .destructive) {
+                        Keychain.delete(DiagnosticUploader.tokenKey)
+                        hasGitHubToken = false
+                    }
+                } else {
+                    SecureField("Token GitHub", text: $githubTokenInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Salva") { saveGitHubToken() }
+                        .disabled(githubTokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if let message = githubMessage ?? uploader.lastResult {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Segnalazione automatica dei problemi")
+            } footer: {
+                Text("A ogni errore o crash il file diagnostico viene inviato a \(DiagnosticUploader.repository) per la correzione. Il token è salvato nel Portachiavi.")
+            }
+
+            Section {
+                Button("Disattiva modalità sviluppatore", role: .destructive) {
+                    developerMode = false
+                    developerNotice = nil
+                }
+            } footer: {
+                Text("Le impostazioni restano come sono. Per riattivarla tocca 7 volte \"Versione\".")
+            }
+        }
+        .tint(Theme.accent)
+        .sheet(item: $report) { item in
+            ActivityView(items: [item.url])
+        }
+        .confirmationDialog("Cancellare il registro diagnostico?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Cancella", role: .destructive) {
+                DiagnosticLog.clear()
+                logSize = DiagnosticLog.sizeDescription
+            }
+        }
+        .onAppear { logSize = DiagnosticLog.sizeDescription }
+        .navigationTitle("Modalità sviluppatore")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func saveGitHubToken() {

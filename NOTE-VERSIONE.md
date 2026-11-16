@@ -1,1 +1,1 @@
-La lavorazione ora continua anche a schermo bloccato e, se si ferma, riprende da sola appena riapri l'app; la Sintesi non si perde più con le registrazioni lunghe. Schede, scorrimento e riproduzione sono molto più veloci anche con registrazioni di ore.
+Impostazioni più semplici: restano solo lingua, AI avanzata, personalizzazioni e aggiornamenti. Le opzioni tecniche sono nella Modalità sviluppatore, che si attiva toccando 7 volte "Versione".

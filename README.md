@@ -6,7 +6,7 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.16.0)
+## Cosa fa (versione 0.16.1)
 
 - **Fa tutto da sola:** dopo ogni registrazione trascrive, riconosce chi parla, migliora il testo con l'AI (se attiva), crea la Sintesi veloce e dà un titolo alla registrazione. Nell'elenco vedi titolo e anteprima della sintesi; la ricerca trova argomenti, persone e parole. Le scelte manuali sono in Impostazioni > Avanzate.
 - **Lavora anche a schermo bloccato:** trascrizione ed elaborazione continuano in background (iOS mostra l'avanzamento); il motore Preciso si scarica in background con il Wi-Fi.

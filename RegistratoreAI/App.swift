@@ -28,6 +28,7 @@ struct RegistratoreAIApp: App {
         DiagnosticUploader.shared.container = container
         CrashCollector.shared.start()
         if TestSupport.isUITest {
+            UserDefaults.standard.removeObject(forKey: SettingsView.developerModeKey)
             TestSupport.seed(into: container.mainContext)
         }
     }

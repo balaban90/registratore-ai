@@ -38,3 +38,6 @@ L'utente (Pasquale) non programma: parla in italiano semplice, niente gergo tecn
 ## Regole dell'interfaccia
 - Nell'interfaccia mai "Claude": solo "AI" / "AI avanzata". "Elaborazioni", non "Riassunti".
 - Testi brevi e professionali, stile Apple. L'app decide da sola; le scelte manuali stanno in Impostazioni.
+- Impostazioni visibili: solo ciò che serve a chiunque (lingua, chiave AI avanzata, modelli, glossario, voci,
+  aggiornamenti). Tutto ciò che è tecnico (modelli AI, motore, automatismi, consumo, diagnostica, token)
+  va nella **Modalità sviluppatore**, che si sblocca toccando 7 volte "Versione" (`SettingsView.developerModeKey`).
