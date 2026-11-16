@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Scarica il codice
         uses: actions/checkout@v4
@@ -33,20 +33,32 @@ jobs:
           set -o pipefail
           xcodebuild \
             -project RegistratoreAI.xcodeproj \
-            -target RegistratoreAI \
+            -scheme RegistratoreAI \
             -configuration Release \
             -sdk iphoneos \
-            SYMROOT="$PWD/build" \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/build/dd" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build | tee xcodebuild.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
-          test -d build/Release-iphoneos/RegistratoreAI.app
+            build > xcodebuild.log 2>&1 || true
+          grep -E "BUILD (SUCCEEDED|FAILED)" xcodebuild.log || true
+          # Errori come annotazioni (leggibili anche senza accesso ai log)
+          { grep -E "error:|failed" xcodebuild.log || true; } | sort -u | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          if ! grep -q "BUILD SUCCEEDED" xcodebuild.log; then
+            tail -25 xcodebuild.log | while IFS= read -r line; do echo "::warning::${line}"; done
+          fi
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+          test -f build/dd/Build/Products/Release-iphoneos/RegistratoreAI.app/RegistratoreAI
 
       - name: Crea il file .ipa
         run: |
           mkdir -p Payload
-          cp -R build/Release-iphoneos/RegistratoreAI.app Payload/
+          cp -R build/dd/Build/Products/Release-iphoneos/RegistratoreAI.app Payload/
           zip -qry RegistratoreAI.ipa Payload
           ls -lh RegistratoreAI.ipa
 
