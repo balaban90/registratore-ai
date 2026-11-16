@@ -1,1 +1,1 @@
-Impostazioni più semplici: restano solo lingua, AI avanzata, personalizzazioni e aggiornamenti. Le opzioni tecniche sono nella Modalità sviluppatore, che si attiva toccando 7 volte "Versione".
+Nuova schermata di apertura con il tasto grande per registrare: toccandolo si trasforma in modo fluido nella registrazione. Le registrazioni ora hanno una scheda tutta loro e il riproduttore ha lo stile vetro.

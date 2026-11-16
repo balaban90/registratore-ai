@@ -12,8 +12,6 @@ struct ContentView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Recording.createdAt, order: .reverse) private var recordings: [Recording]
 
-    @State private var showRecorder = false
-    @State private var autoStartRecording = false
     @State private var showImporter = false
     @State private var showSettings = false
     @State private var importError: String?
@@ -133,9 +131,6 @@ struct ContentView: View {
                     }
                 }
 
-                Color.clear.frame(height: 90)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -143,21 +138,6 @@ struct ContentView: View {
             .navigationTitle("Registrazioni")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $search, prompt: "Cerca per argomento, persona o parola")
-            .onOpenURL { url in
-                // Widget "Registra" e pulsante del Centro di Controllo.
-                guard url.host == "record" else { return }
-                path = []
-                autoStartRecording = true
-                showRecorder = true
-            }
-            .onChange(of: showRecorder) { _, shown in
-                if !shown { autoStartRecording = false }
-            }
-            .task {
-                Pipeline.shared.resumePending(recordings, in: context)
-                WhisperModel.shared.downloadIfAppropriate()
-                await UpdateChecker.shared.check()
-            }
             .navigationDestination(for: Recording.self) { recording in
                 RecordingDetailView(recording: recording)
             }
@@ -177,17 +157,17 @@ struct ContentView: View {
                     }
                 }
             }
-            .overlay(alignment: .bottom) { recordBar }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
-            .fullScreenCover(isPresented: $showRecorder) {
-                RecordView(autoStart: autoStartRecording) { finished in
-                    save(finished)
-                }
-            }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
-                Task { await importAudio(result) }
+                Task {
+                    do {
+                        try await RecordingActions.importAudio(result, in: context)
+                    } catch {
+                        importError = error.localizedDescription
+                    }
+                }
             }
             .alert("Importazione non riuscita", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -214,7 +194,7 @@ struct ContentView: View {
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(Theme.recordGradient)
             Text("Nessuna registrazione").font(.title3.bold())
-            Text("Tocca il pulsante rosso per registrare, oppure importa un file audio.")
+            Text("Registra dalla scheda Registra, oppure importa un file audio.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -224,44 +204,7 @@ struct ContentView: View {
         .padding(.horizontal, 30)
     }
 
-    private var recordBar: some View {
-        HStack(spacing: 14) {
-            Text("Nuova registrazione")
-                .font(.subheadline.weight(.semibold))
-                .padding(.leading, 12)
-            Button {
-                showRecorder = true
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 64, height: 64)
-                    .background(Theme.recordGradient, in: Circle())
-                    .shadow(color: Theme.magenta.opacity(0.35), radius: 9, y: 6)
-            }
-            .accessibilityLabel("Avvia registrazione")
-        }
-        .padding(10)
-        .glass(cornerRadius: 42)
-        .padding(.bottom, 8)
-    }
-
     // MARK: - Azioni
-
-    private func save(_ finished: FinishedRecording) {
-        let recording = Recording(
-            title: defaultTitle(for: finished.startedAt),
-            audioFileName: finished.fileName,
-            duration: finished.duration,
-            inputName: finished.inputName,
-            highlights: finished.highlights,
-            createdAt: finished.startedAt
-        )
-        context.insert(recording)
-        try? context.save()
-        // Resta nell'elenco: la registrazione si lavora da sola e l'anteprima compare quando è pronta.
-        pipeline.process(recording, in: context)
-    }
 
     private func delete(_ recording: Recording) {
         Storage.delete(fileName: recording.audioFileName)
@@ -270,28 +213,6 @@ struct ContentView: View {
         toDelete = nil
     }
 
-    private func importAudio(_ result: Result<[URL], Error>) async {
-        do {
-            guard let source = try result.get().first else { return }
-            let accessing = source.startAccessingSecurityScopedResource()
-            defer { if accessing { source.stopAccessingSecurityScopedResource() } }
-
-            let ext = source.pathExtension.isEmpty ? "m4a" : source.pathExtension.lowercased()
-            let name = Storage.newFileName(ext: ext)
-            try FileManager.default.copyItem(at: source, to: Storage.url(for: name))
-
-            let asset = AVURLAsset(url: Storage.url(for: name))
-            let duration = (try? await asset.load(.duration).seconds) ?? 0
-
-            let title = source.deletingPathExtension().lastPathComponent
-            let recording = Recording(title: title, audioFileName: name, duration: duration, inputName: "File importato")
-            context.insert(recording)
-            try? context.save()
-            pipeline.process(recording, in: context)
-        } catch {
-            importError = error.localizedDescription
-        }
-    }
 }
 
 struct RecordingCard: View {

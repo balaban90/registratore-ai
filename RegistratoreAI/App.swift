@@ -35,7 +35,7 @@ struct RegistratoreAIApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .tint(Theme.accent)
         }
         .modelContainer(container)
