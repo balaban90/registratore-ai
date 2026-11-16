@@ -13,8 +13,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.15.3"
-    CURRENT_PROJECT_VERSION: "21"
+    MARKETING_VERSION: "0.16.0"
+    CURRENT_PROJECT_VERSION: "22"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
@@ -85,8 +85,39 @@ targets:
         GENERATE_INFOPLIST_FILE: "NO"
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: "YES"
+  RegistratoreAITests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: RegistratoreAITests
+    dependencies:
+      - target: RegistratoreAI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: it.registratoreai.app.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TARGETED_DEVICE_FAMILY: "1"
+  RegistratoreAIUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: RegistratoreAIUITests
+    dependencies:
+      - target: RegistratoreAI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: it.registratoreai.app.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_TARGET_NAME: RegistratoreAI
 schemes:
   RegistratoreAI:
     build:
       targets:
         RegistratoreAI: all
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - RegistratoreAITests
+        - RegistratoreAIUITests

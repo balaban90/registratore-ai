@@ -38,6 +38,7 @@ final class UpdateChecker: ObservableObject {
 
     /// Controlla al massimo una volta ogni 30 minuti, se non forzato.
     func check(force: Bool = false) async {
+        guard !TestSupport.isTesting else { return }
         if !force, let lastCheck, Date.now.timeIntervalSince(lastCheck) < 30 * 60 { return }
         guard !checking else { return }
         checking = true

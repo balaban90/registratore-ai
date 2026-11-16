@@ -5,12 +5,14 @@ enum SummaryFailure: LocalizedError {
     case unavailable(String)
     case tooLong
     case blocked
+    case busy
 
     var errorDescription: String? {
         switch self {
         case .unavailable(let message): return message
         case .tooLong: return "Testo troppo lungo per l'AI sul dispositivo. Usa l'AI avanzata."
         case .blocked: return "L'AI sul dispositivo non può elaborare questo contenuto. Usa l'AI avanzata."
+        case .busy: return "L'AI sul dispositivo è occupata. Riprova tra poco."
         }
     }
 }
@@ -18,9 +20,15 @@ enum SummaryFailure: LocalizedError {
 /// Riassunti con il modello Apple sul dispositivo (gratuito, offline).
 /// Il modello legge circa 4.096 token alla volta: le trascrizioni lunghe
 /// vengono divise in parti, riassunte una per una e poi ricomposte.
+/// Se una parte risulta comunque troppo lunga, viene divisa ancora (mai un errore per la lunghezza).
 enum SummaryService {
-    /// ~4.500 caratteri di italiano ≈ 1.300–1.500 token: lascia spazio a istruzioni e risposta.
-    static let chunkChars = 4_500
+    /// ~6.000 caratteri di italiano ≈ 1.800–2.000 token: lascia spazio a istruzioni e risposta.
+    static let chunkChars = 6_000
+    /// Sotto questa misura una parte non si divide più.
+    static let minChunkChars = 600
+
+    /// Chi risponde: il modello Apple, oppure un sostituto nei test.
+    typealias Asker = (_ instructions: String, _ prompt: String) async throws -> String
 
     static var availabilityMessage: String? {
         switch SystemLanguageModel.default.availability {
@@ -40,36 +48,58 @@ enum SummaryService {
         }
     }
 
-    static func summarize(transcript: String, template: SummaryTemplate, progress: @escaping @MainActor (String) -> Void) async throws -> String {
+    static func summarize(transcript: String, template: SummaryTemplate,
+                          progress: @escaping @MainActor (String) -> Void) async throws -> String {
         if let message = availabilityMessage { throw SummaryFailure.unavailable(message) }
+        return try await summarize(transcript: transcript, template: template, chunkChars: chunkChars,
+                                   using: { try await ask(instructions: $0, prompt: $1) }, progress: progress)
+    }
 
+    static func summarize(transcript: String, template: SummaryTemplate, chunkChars: Int,
+                          using ask: Asker, progress: @escaping @MainActor (String) -> Void) async throws -> String {
         var material = transcript
         var isNotes = false
-        var round = 0
+        var size = chunkChars
 
-        // Riduce il testo finché non entra in una sola richiesta.
-        while material.count > chunkChars && round < 4 {
-            round += 1
-            let chunks = split(material, maxChars: chunkChars)
-            var notes: [String] = []
-            for (i, chunk) in chunks.enumerated() {
-                await progress("Leggo la parte \(i + 1) di \(chunks.count)…")
-                notes.append(try await extractNotes(from: chunk, part: i + 1, of: chunks.count))
-            }
-            material = notes.joined(separator: "\n\n")
-            isNotes = true
-        }
-
-        await progress("Scrivo l'elaborazione…")
         let instructions = """
         Sei un assistente che riassume registrazioni. \(template.instructions)
 
         \(SummaryTemplate.commonRules)
         """
-        let intro = isNotes
-            ? "Ecco gli appunti estratti, in ordine, da una registrazione lunga:"
-            : "Ecco la trascrizione della registrazione:"
-        return try await ask(instructions: instructions, prompt: "\(intro)\n\n\(material)")
+        for _ in 0..<6 {
+            // Riduce il testo finché non entra in una sola richiesta.
+            var round = 0
+            while material.count > size && round < 5 {
+                round += 1
+                let chunks = split(material, maxChars: size)
+                var notes: [String] = []
+                for (i, chunk) in chunks.enumerated() {
+                    await progress("Leggo la parte \(i + 1) di \(chunks.count)…")
+                    notes.append(try await extractNotes(from: chunk, part: i + 1, of: chunks.count, using: ask))
+                }
+                let joined = notes.joined(separator: "\n\n")
+                if joined.count < material.count {
+                    material = joined
+                    isNotes = true
+                } else {
+                    // Gli appunti non accorciano il testo: si riprova con parti più piccole, mai all'infinito.
+                    if size <= minChunkChars { throw SummaryFailure.tooLong }
+                    size = max(minChunkChars, size / 2)
+                }
+            }
+
+            await progress("Scrivo l'elaborazione…")
+            let intro = isNotes
+                ? "Ecco gli appunti estratti, in ordine, da una registrazione lunga:"
+                : "Ecco la trascrizione della registrazione:"
+            do {
+                return try await ask(instructions, "\(intro)\n\n\(material)")
+            } catch SummaryFailure.tooLong where material.count > minChunkChars {
+                // Il testo finale non entra: si riduce ancora con parti più piccole.
+                size = max(minChunkChars, min(size, material.count) / 2)
+            }
+        }
+        throw SummaryFailure.tooLong
     }
 
     /// Titolo breve (3-7 parole) per riconoscere la registrazione nell'elenco. Gratis, sul dispositivo.
@@ -81,13 +111,23 @@ enum SummaryService {
         return String(firstLine.trimmingCharacters(in: CharacterSet(charactersIn: " \"«»*#.")).prefix(80))
     }
 
-    private static func extractNotes(from chunk: String, part: Int, of total: Int) async throws -> String {
+    private static func extractNotes(from chunk: String, part: Int, of total: Int, using ask: Asker) async throws -> String {
         let instructions = """
         Estrai da una parte di trascrizione gli appunti essenziali, in italiano, come elenco puntato.
         Conserva: temi, concetti, posizioni di chi parla, decisioni, numeri, date, nomi, impegni.
         Non aggiungere nulla che non sia nel testo. Massimo 15 punti.
         """
-        return try await ask(instructions: instructions, prompt: "Parte \(part) di \(total):\n\n\(chunk)")
+        do {
+            return try await ask(instructions, "Parte \(part) di \(total):\n\n\(chunk)")
+        } catch SummaryFailure.tooLong where chunk.count > minChunkChars {
+            // Parte troppo lunga per il modello: la si divide in due e si riprova.
+            let halves = split(chunk, maxChars: chunk.count / 2 + 1)
+            var notes: [String] = []
+            for half in halves {
+                notes.append(try await extractNotes(from: half, part: part, of: total, using: ask))
+            }
+            return notes.joined(separator: "\n")
+        }
     }
 
     private static func ask(instructions: String, prompt: String) async throws -> String {
@@ -101,6 +141,8 @@ enum SummaryService {
                 throw SummaryFailure.tooLong
             case .guardrailViolation:
                 throw SummaryFailure.blocked
+            case .rateLimited:
+                throw SummaryFailure.busy
             default:
                 throw error
             }

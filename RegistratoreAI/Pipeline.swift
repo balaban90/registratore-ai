@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import UIKit
 
 /// Lavorazione automatica di una registrazione, come Plaud: dopo aver registrato
 /// fa tutto da sola, senza scelte tecniche.
@@ -39,9 +40,25 @@ final class Pipeline: ObservableObject {
     func process(_ recording: Recording, in context: ModelContext, retranscribe: Bool = false) {
         recording.pipelinePending = true
         try? context.save()
+        if TestSupport.fakeProcessingSteps > 0 {
+            // Solo nei test automatici: lavorazione finta di durata nota, per verificare il background.
+            run(recording, in: context) { [self] in
+                try await TestSupport.fakeWork(steps: TestSupport.fakeProcessingSteps) { [weak self] message in
+                    self?.report(recording.id, message)
+                }
+                let summary = Summary(templateID: "sintesi", templateName: "Sintesi veloce", text: TestSupport.fakeSummaryText)
+                summary.recording = recording
+                context.insert(summary)
+                try? context.save()
+            }
+            return
+        }
         run(recording, in: context) { [self] in
             if retranscribe || recording.transcript == nil {
                 try await transcribe(recording, in: context)
+                // Il motore Preciso occupa molta memoria: lo si libera prima dei passaggi successivi
+                // (con registrazioni di ore iOS potrebbe chiudere l'app in background).
+                TranscriptionService.releaseMemory()
             }
             if DiarizationService.isEnabled && !recording.diarized {
                 await diarizeQuietly(recording, in: context)
@@ -71,8 +88,15 @@ final class Pipeline: ObservableObject {
     /// Riprende le registrazioni rimaste a metà (es. app chiusa durante la trascrizione).
     func resumePending(_ recordings: [Recording], in context: ModelContext) {
         for r in recordings where (r.pipelinePending || (r.transcript == nil && r.transcriptionError == nil)) && !isRunning(r) {
+            DiagnosticLog.info(.pipeline, "\(r.id.uuidString.prefix(8)) riprendo la lavorazione rimasta a metà")
             process(r, in: context)
         }
+    }
+
+    /// Come sopra, cercando da sé le registrazioni (all'apertura dell'app e a ogni ritorno in primo piano).
+    func resumePending(in context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<Recording>())) ?? []
+        resumePending(all, in: context)
     }
 
     private func run(_ recording: Recording, in context: ModelContext, _ work: @escaping () async throws -> Void) {
@@ -272,30 +296,54 @@ final class Pipeline: ObservableObject {
         }
     }
 
-    /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile, con l'AI avanzata.
+    /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile o non riesce, con l'AI avanzata.
+    /// In background iOS limita l'AI sul dispositivo: in quel caso la sintesi si completa
+    /// da sola appena si apre l'app, senza spendere credito.
     private func summaryQuietly(_ recording: Recording, in context: ModelContext) async {
         let template = SummaryTemplate.byID("sintesi")
         let id = recording.id
+        guard let transcript = recording.transcript, !transcript.isEmpty else { return }
         say(recording, "Preparo la sintesi…")
-        do {
-            if SummaryService.availabilityMessage == nil, let transcript = recording.transcript {
+        let started = Date.now
+        if SummaryService.availabilityMessage == nil {
+            do {
                 let text = try await SummaryService.summarize(transcript: transcript, template: template) { [weak self] message in
                     self?.report(id, message)
                 }
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
                 summary.recording = recording
                 context.insert(summary)
-            } else if ClaudeService.isConfigured {
-                DiagnosticLog.info(.onDevice, "AI sul dispositivo non disponibile (\(SummaryService.availabilityMessage ?? "?")): sintesi con AI avanzata")
-                let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript, template: template)
-                let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
-                summary.recording = recording
-                context.insert(summary)
+                try? context.save()
+                DiagnosticLog.info(.onDevice, "Sintesi sul dispositivo pronta in \(Int(Date.now.timeIntervalSince(started))) s · \(transcript.count) caratteri")
+                return
+            } catch {
+                let inBackground = UIApplication.shared.applicationState != .active
+                DiagnosticLog.warning(.onDevice, "Sintesi sul dispositivo non riuscita dopo \(Int(Date.now.timeIntervalSince(started))) s\(inBackground ? " con l'app in background" : ""): \(DiagnosticLog.describe(error))")
+                if inBackground {
+                    retryLater.insert(id)
+                    return
+                }
+                guard ClaudeService.isConfigured else {
+                    DiagnosticLog.error(.onDevice, "Sintesi veloce fallita", error)
+                    errors[id] = "Sintesi: \(Self.readable(error))"
+                    return
+                }
             }
+        } else {
+            DiagnosticLog.info(.onDevice, "AI sul dispositivo non disponibile (\(SummaryService.availabilityMessage ?? "?"))")
+        }
+        guard ClaudeService.isConfigured else { return }
+        do {
+            say(recording, "Preparo la sintesi con l'AI avanzata…")
+            let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript, template: template)
+            let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
+            summary.recording = recording
+            context.insert(summary)
             try? context.save()
         } catch {
-            DiagnosticLog.error(.onDevice, "Sintesi veloce fallita", error)
+            DiagnosticLog.error(.ai, "Sintesi con l'AI avanzata fallita", error)
             errors[id] = "Sintesi: \(Self.readable(error))"
+            if error is URLError { retryLater.insert(id) }
         }
     }
 

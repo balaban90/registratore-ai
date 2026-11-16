@@ -74,7 +74,7 @@ final class WhisperModel: ObservableObject {
     /// Avvia il download in background, solo se serve e se la rete non è a consumo.
     /// Se per 2 minuti non avanza, lo interrompe: riproverà alla prossima occasione.
     func downloadIfAppropriate() {
-        guard TranscriptionEngine.current != .fast, !Self.isReady, downloadProgress == nil,
+        guard !TestSupport.isTesting, TranscriptionEngine.current != .fast, !Self.isReady, downloadProgress == nil,
               NetworkStatus.shared.isUnmetered else { return }
         downloadProgress = 0
         lastError = nil

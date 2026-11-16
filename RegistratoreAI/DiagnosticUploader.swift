@@ -38,7 +38,7 @@ final class DiagnosticUploader: ObservableObject {
 
     /// Invio automatico: solo se attivo, configurato, c'è un problema nuovo e non si è appena inviato.
     func sendIfNeeded(reason: String) {
-        guard Self.autoUpload, Self.isConfigured, Self.hasPending, !sending else { return }
+        guard !TestSupport.isTesting, Self.autoUpload, Self.isConfigured, Self.hasPending, !sending else { return }
         if let last = Self.lastSent, Date.now.timeIntervalSince(last) < Self.minimumInterval { return }
         Task { _ = await send(reason: "automatico · \(reason)", note: nil) }
     }
@@ -46,6 +46,7 @@ final class DiagnosticUploader: ObservableObject {
     /// Invia subito il rapporto. Restituisce true se è arrivato.
     @discardableResult
     func send(reason: String, note: String?) async -> Bool {
+        guard !TestSupport.isTesting else { return false }
         guard let token = Self.token else {
             lastResult = "Inserisci prima il token GitHub."
             return false

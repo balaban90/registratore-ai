@@ -20,7 +20,9 @@ struct FinishedRecording {
 /// sopravvive a chiamate e scollegamenti del microfono esterno.
 @MainActor
 final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
-    @Published var isRecording = false
+    @Published var isRecording = false {
+        didSet { AudioActivity.recording = isRecording }
+    }
     @Published var isPaused = false
     @Published var elapsed: TimeInterval = 0
     @Published var level: Float = 0
@@ -246,7 +248,12 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         level = 0
         levels = Array(repeating: 0, count: 44)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        if KeepAlive.shared.isRunning {
+            // Un'altra registrazione è ancora in lavorazione: la sessione audio resta attiva.
+            KeepAlive.shared.reassert()
+        } else {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        }
         return FinishedRecording(fileName: fileName, duration: max(duration, elapsed), highlights: highlights, inputName: currentInputName, startedAt: startedAt)
     }
 

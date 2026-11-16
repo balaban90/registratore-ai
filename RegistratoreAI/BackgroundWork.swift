@@ -41,6 +41,7 @@ final class BackgroundWork {
         fraction = 0
         shown = 0
         startHeartbeat()
+        KeepAlive.shared.start()
 
         shortTask = UIApplication.shared.beginBackgroundTask(withName: "lavorazione") { [weak self] in
             MainActor.assumeIsolated { self?.endShortTask() }
@@ -88,6 +89,7 @@ final class BackgroundWork {
         }
         task = nil
         stopHeartbeat()
+        KeepAlive.shared.stop()
         endShortTask()
     }
 
@@ -136,7 +138,7 @@ final class BackgroundWork {
         let gap = Int(Date.now.timeIntervalSince(lastBeat))
         lastBeat = .now
         guard gap > 30 else { return }
-        DiagnosticLog.warning(.pipeline, "Lavorazione rimasta ferma \(gap) s mentre l'app era in background (\(subtitle))")
+        DiagnosticLog.warning(.pipeline, "Lavorazione rimasta ferma \(gap) s mentre l'app era in background (\(subtitle)) · sessione audio \(KeepAlive.shared.isPlaying ? "attiva" : "non attiva")")
         DiagnosticUploader.markPending()
         DiagnosticUploader.shared.sendIfNeeded(reason: "lavorazione ferma in background")
     }

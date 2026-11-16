@@ -1,1 +1,1 @@
-Se il miglioramento con l'AI resta senza risposta mentre l'app è in background, ora riprova da solo; e se la rete manca, lo rifà automaticamente alla prossima apertura dell'app.
+La lavorazione ora continua anche a schermo bloccato e, se si ferma, riprende da sola appena riapri l'app; la Sintesi non si perde più con le registrazioni lunghe. Schede, scorrimento e riproduzione sono molto più veloci anche con registrazioni di ore.

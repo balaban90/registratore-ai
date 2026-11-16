@@ -135,6 +135,14 @@ enum TranscriptionService {
         }
     }
 
+    /// Libera la memoria del motore Preciso (si ricarica in pochi secondi quando serve).
+    @MainActor
+    static func releaseMemory() {
+        guard loading == nil, whisper != nil else { return }
+        whisper = nil
+        DiagnosticLog.info(.whisper, "Motore Preciso scaricato dalla memoria")
+    }
+
     @MainActor
     private static func loadWhisper() async throws -> WhisperKit {
         if let whisper { return whisper }

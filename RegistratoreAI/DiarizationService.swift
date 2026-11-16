@@ -98,19 +98,45 @@ enum DiarizationService {
         return speaker.currentEmbedding
     }
 
-    /// Parlante che copre di più l'intervallo; se nessuno lo copre, il turno più vicino.
-    private static func speaker(for start: Double, _ end: Double, in turns: [SpeakerTurn]) -> String? {
-        var best: (id: String, overlap: Double)?
-        let e = max(end, start + 0.2)
-        for turn in turns {
-            let overlap = min(e, turn.end) - max(start, turn.start)
-            if overlap > 0, overlap > (best?.overlap ?? 0) {
-                best = (turn.speakerId, overlap)
-            }
+    /// Turni ordinati per inizio, per trovare in fretta chi parla in un istante
+    /// (con registrazioni di ore i turni sono migliaia e le parole decine di migliaia).
+    struct TurnIndex {
+        let turns: [SpeakerTurn]
+        private let maxLength: Double
+
+        init(_ turns: [SpeakerTurn]) {
+            self.turns = turns.sorted { $0.start < $1.start }
+            maxLength = turns.map { $0.end - $0.start }.max() ?? 0
         }
-        if let best { return best.id }
-        let mid = (start + e) / 2
-        return turns.min { abs(($0.start + $0.end) / 2 - mid) < abs(($1.start + $1.end) / 2 - mid) }?.speakerId
+
+        /// Primo turno che inizia dopo `time`.
+        private func upperBound(_ time: Double) -> Int {
+            var low = 0, high = turns.count
+            while low < high {
+                let mid = (low + high) / 2
+                if turns[mid].start < time { low = mid + 1 } else { high = mid }
+            }
+            return low
+        }
+
+        /// Parlante che copre di più l'intervallo; se nessuno lo copre, il turno più vicino.
+        func speaker(for start: Double, _ end: Double) -> String? {
+            guard !turns.isEmpty else { return nil }
+            var best: (id: String, overlap: Double)?
+            let e = max(end, start + 0.2)
+            let ub = upperBound(e)
+            var i = ub - 1
+            while i >= 0 && turns[i].start >= start - maxLength {
+                let turn = turns[i]
+                let overlap = min(e, turn.end) - max(start, turn.start)
+                if overlap > 0, overlap > (best?.overlap ?? 0) { best = (turn.speakerId, overlap) }
+                i -= 1
+            }
+            if let best { return best.id }
+            let mid = (start + e) / 2
+            let range = max(0, ub - 3)..<min(turns.count, ub + 3)
+            return turns[range].min { abs(($0.start + $0.end) / 2 - mid) < abs(($1.start + $1.end) / 2 - mid) }?.speakerId
+        }
     }
 
     /// Assegna i parlanti parola per parola: quando nella stessa frase cambia
@@ -118,7 +144,10 @@ enum DiarizationService {
     /// pausa ("Va bene, verifica a marzo") non finisce nel turno dell'altro.
     /// Le frasi senza orari delle parole (es. già riviste dall'AI) ricevono un solo parlante.
     static func assign(_ turns: [SpeakerTurn], to segments: [TranscriptSegment]) -> [TranscriptSegment] {
+        let index = TurnIndex(turns)
+        func speaker(for start: Double, _ end: Double, in _: [SpeakerTurn]) -> String? { index.speaker(for: start, end) }
         var output: [TranscriptSegment] = []
+        output.reserveCapacity(segments.count)
         for segment in segments {
             guard let words = segment.words, words.count > 1 else {
                 var s = segment

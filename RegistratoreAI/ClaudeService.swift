@@ -170,6 +170,27 @@ enum ClaudeService {
         let error: Detail
     }
 
+    static let maxAttempts = 3
+
+    /// Attesa prima del nuovo tentativo: 2 s, poi 6 s.
+    static func retryDelay(_ attempt: Int) -> Int { attempt <= 1 ? 2 : 6 }
+
+    /// Problemi di rete passeggeri, per cui ha senso riprovare.
+    static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed, .internationalRoamingOff, .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Risposte del server temporanee: troppe richieste, sovraccarico, errori interni.
+    static func isTransient(status: Int) -> Bool {
+        [408, 429, 500, 502, 503, 504, 529].contains(status)
+    }
+
     /// `cachedContext` va in cache; `instructions` (facoltativo) viene dopo, fuori dalla cache.
     static func send(cachedContext: String, instructions: String? = nil, messages: [ClaudeMessage],
                      maxTokens: Int, model: ClaudeModel, key: String? = nil) async throws -> ClaudeReply {
@@ -192,31 +213,36 @@ enum ClaudeService {
 
         let started = Date.now
         let sentBytes = request.httpBody?.count ?? 0
-        let result: (Data, URLResponse)
-        do {
-            result = try await URLSession.shared.data(for: request)
-        } catch let error as URLError where error.code == .timedOut || error.code == .networkConnectionLost {
-            // Connessione rimasta appesa (es. iOS ha sospeso l'app in background): si riprova una volta.
-            DiagnosticLog.warning(.ai, "Richiesta \(model.rawValue) senza risposta dopo \(Int(Date.now.timeIntervalSince(started))) s (\(error.code.rawValue)): riprovo")
-            try? await Task.sleep(for: .seconds(2))
-            let retryStarted = Date.now
+        var attempt = 0
+        var data = Data()
+        requestLoop: while true {
+            attempt += 1
+            let attemptStarted = Date.now
             do {
-                result = try await URLSession.shared.data(for: request)
-            } catch {
-                DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) anche al secondo tentativo dopo \(Int(Date.now.timeIntervalSince(retryStarted))) s, inviati \(sentBytes) byte", error)
+                let (body, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if (200..<300).contains(status) {
+                    data = body
+                    break requestLoop
+                }
+                let message = (try? JSONDecoder().decode(ErrorBody.self, from: body))?.error.message
+                    ?? String(data: body, encoding: .utf8) ?? ""
+                if isTransient(status: status) && attempt < maxAttempts {
+                    // Server occupato o sovraccarico: si riprova poco dopo.
+                    DiagnosticLog.warning(.ai, "Richiesta \(model.rawValue): HTTP \(status), tentativo \(attempt) di \(maxAttempts): riprovo")
+                    try await Task.sleep(for: .seconds(retryDelay(attempt)))
+                    continue requestLoop
+                }
+                DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) rifiutata: HTTP \(status) — \(message.prefix(400))")
+                throw ClaudeFailure.http(status, message)
+            } catch let error as URLError where isTransient(error) && attempt < maxAttempts {
+                // Connessione caduta o rimasta appesa (rete instabile, cambio Wi-Fi/cellulare): si riprova.
+                DiagnosticLog.warning(.ai, "Richiesta \(model.rawValue) senza risposta dopo \(Int(Date.now.timeIntervalSince(attemptStarted))) s (\(error.code.rawValue)), tentativo \(attempt) di \(maxAttempts): riprovo")
+                try await Task.sleep(for: .seconds(retryDelay(attempt)))
+            } catch let error as URLError {
+                DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) dopo \(attempt) tentativi in \(Int(Date.now.timeIntervalSince(started))) s, inviati \(sentBytes) byte", error)
                 throw error
             }
-        } catch {
-            DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) dopo \(Int(Date.now.timeIntervalSince(started))) s, inviati \(sentBytes) byte", error)
-            throw error
-        }
-        let (data, response) = result
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
-            let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error.message
-                ?? String(data: data, encoding: .utf8) ?? ""
-            DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) rifiutata: HTTP \(status) — \(message.prefix(400))")
-            throw ClaudeFailure.http(status, message)
         }
         let decoded: ResponseBody
         do {

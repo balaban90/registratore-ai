@@ -69,8 +69,103 @@ jobs:
           path: RegistratoreAI.ipa
           retention-days: 30
 
+      - name: Carica il log in caso di errore
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-compilazione
+          path: xcodebuild.log
+
+  test:
+    name: Prove automatiche
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Scegli Xcode 26 più recente
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+
+      - name: Installa XcodeGen
+        run: brew install xcodegen
+
+      - name: Genera il progetto Xcode
+        run: xcodegen generate
+
+      - name: Scegli il simulatore iPhone
+        run: |
+          ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, devices in data.items():
+              if "iOS" not in runtime:
+                  continue
+              version = [int(x) for x in runtime.split("iOS-")[-1].split("-") if x.isdigit()]
+              for d in devices:
+                  if d["name"].startswith("iPhone") and d.get("isAvailable", True):
+                      key = (version, "Pro" in d["name"], d["name"])
+                      if best is None or key > best[0]:
+                          best = (key, d["udid"], d["name"], runtime)
+          print(best[1]); print(best[2] + " · " + best[3], file=sys.stderr)
+          ')
+          echo "SIM_ID=$ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ID" || true
+
+      - name: Esegui le prove
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project RegistratoreAI.xcodeproj \
+            -scheme RegistratoreAI \
+            -destination "id=$SIM_ID" \
+            -derivedDataPath "$PWD/build/dd" \
+            -resultBundlePath "$PWD/Prove.xcresult" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=- \
+            > prove.log 2>&1 || true
+          # Riepilogo leggibile: tempi misurati e prove fallite
+          grep -E "^TEMPO|Riproduzione: dalla|Sintesi di [0-9]+ caratteri|Lavorazione ancora" prove.log | sort -u | while IFS= read -r line; do echo "::notice::${line}"; done || true
+          { grep -E "error: |: error:|failed \(" prove.log || true; } | grep -v "^ld: warning" | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
+          grep -E "Test Suite '(All tests|RegistratoreAI.*\.xctest)'|Executed [0-9]+ tests" prove.log | tail -6 || true
+          if ! grep -q "\*\* TEST SUCCEEDED \*\*" prove.log; then
+            tail -40 prove.log | while IFS= read -r line; do echo "::warning::${line}"; done
+            exit 1
+          fi
+
+      - name: Carica i risultati delle prove
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: risultati-prove
+          path: |
+            prove.log
+            Prove.xcresult
+          retention-days: 14
+
+  release:
+    name: Pubblica la versione
+    needs: [build, test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Scarica l'IPA compilato
+        uses: actions/download-artifact@v4
+        with:
+          name: RegistratoreAI-ipa
+
       - name: Pubblica la versione (aggiornamento dall'app)
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -85,9 +180,3 @@ jobs:
           [ -f "$NOTES" ] || echo "Nuova versione." > "$NOTES"
           gh release create "$TAG" RegistratoreAI.ipa --title "Registratore AI $VER (build $BUILD)" --notes-file "$NOTES" --latest
 
-      - name: Carica il log in caso di errore
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: log-compilazione
-          path: xcodebuild.log

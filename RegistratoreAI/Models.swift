@@ -40,6 +40,34 @@ struct TranscriptSegment: Codable, Hashable, Identifiable {
     }
 }
 
+/// Memoria dei dati già decodificati, per non rileggere il JSON a ogni schermata.
+/// Una voce vale finché i byte salvati restano identici.
+final class DecodeCache: @unchecked Sendable {
+    static let shared = DecodeCache()
+    private let lock = NSLock()
+    private var entries: [String: (data: Data, value: Any)] = [:]
+    private let limit = 80
+
+    func value<T>(_ key: String, _ data: Data, make: (Data) -> T) -> T {
+        lock.lock()
+        if let entry = entries[key], let value = entry.value as? T, entry.data == data {
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+        let value = make(data)
+        store(key, data, value)
+        return value
+    }
+
+    func store<T>(_ key: String, _ data: Data, _ value: T) {
+        lock.lock()
+        if entries.count >= limit && entries[key] == nil { entries.removeAll(keepingCapacity: true) }
+        entries[key] = (data, value)
+        lock.unlock()
+    }
+}
+
 /// Profilo vocale salvato: permette di riconoscere una persona nelle nuove registrazioni.
 @Model
 final class VoiceProfile {
@@ -101,30 +129,44 @@ final class Recording {
 
     var audioURL: URL { Storage.url(for: audioFileName) }
 
+    // I dati della trascrizione sono salvati come JSON. Leggerli è costoso (una registrazione
+    // lunga ha decine di migliaia di parole), quindi ogni lettura passa da DecodeCache:
+    // si decodifica una sola volta finché il contenuto non cambia.
+
     var segments: [TranscriptSegment] {
         get {
             guard let segmentsData else { return [] }
-            return (try? JSONDecoder().decode([TranscriptSegment].self, from: segmentsData)) ?? []
+            return DecodeCache.shared.value("\(id).seg", segmentsData) {
+                (try? JSONDecoder().decode([TranscriptSegment].self, from: $0)) ?? []
+            }
         }
         set {
-            segmentsData = try? JSONEncoder().encode(newValue)
+            let data = try? JSONEncoder().encode(newValue)
+            if let data { DecodeCache.shared.store("\(id).seg", data, newValue) }
+            segmentsData = data
         }
     }
 
     var originalSegments: [TranscriptSegment] {
         get {
             guard let originalSegmentsData else { return [] }
-            return (try? JSONDecoder().decode([TranscriptSegment].self, from: originalSegmentsData)) ?? []
+            return DecodeCache.shared.value("\(id).orig", originalSegmentsData) {
+                (try? JSONDecoder().decode([TranscriptSegment].self, from: $0)) ?? []
+            }
         }
         set {
-            originalSegmentsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
+            let data = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
+            if let data { DecodeCache.shared.store("\(id).orig", data, newValue) }
+            originalSegmentsData = data
         }
     }
 
     var speakerNames: [String: String] {
         get {
             guard let speakerNamesData else { return [:] }
-            return (try? JSONDecoder().decode([String: String].self, from: speakerNamesData)) ?? [:]
+            return DecodeCache.shared.value("\(id).names", speakerNamesData) {
+                (try? JSONDecoder().decode([String: String].self, from: $0)) ?? [:]
+            }
         }
         set {
             speakerNamesData = try? JSONEncoder().encode(newValue)
@@ -134,7 +176,9 @@ final class Recording {
     var speakerSuggestions: [String: String] {
         get {
             guard let speakerSuggestionsData else { return [:] }
-            return (try? JSONDecoder().decode([String: String].self, from: speakerSuggestionsData)) ?? [:]
+            return DecodeCache.shared.value("\(id).sugg", speakerSuggestionsData) {
+                (try? JSONDecoder().decode([String: String].self, from: $0)) ?? [:]
+            }
         }
         set {
             speakerSuggestionsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
@@ -143,9 +187,18 @@ final class Recording {
 
     /// Parlanti nell'ordine in cui intervengono per la prima volta.
     var speakerOrder: [String] {
+        guard let segmentsData else { return [] }
+        let list = segments
+        return DecodeCache.shared.value("\(id).order", segmentsData) { _ in
+            Recording.order(of: list)
+        }
+    }
+
+    static func order(of segments: [TranscriptSegment]) -> [String] {
         var seen: [String] = []
+        var known = Set<String>()
         for s in segments {
-            if let id = s.speaker, !seen.contains(id) { seen.append(id) }
+            if let id = s.speaker, known.insert(id).inserted { seen.append(id) }
         }
         return seen
     }
@@ -153,14 +206,21 @@ final class Recording {
     /// Nome da mostrare: quello assegnato, altrimenti "Persona N".
     func speakerName(_ id: String?) -> String {
         guard let id else { return "" }
-        if let name = speakerNames[id], !name.isEmpty { return name }
-        if let index = speakerOrder.firstIndex(of: id) { return "Persona \(index + 1)" }
+        return Recording.displayName(id, names: speakerNames, order: speakerOrder)
+    }
+
+    static func displayName(_ id: String, names: [String: String], order: [String]) -> String {
+        if let name = names[id], !name.isEmpty { return name }
+        if let index = order.firstIndex(of: id) { return "Persona \(index + 1)" }
         return "Persona"
     }
 
     /// Testo per l'AI: una riga per turno di parola, con il nome se le voci sono separate.
     var plainTranscript: String {
+        let segments = self.segments
         guard diarized else { return segments.map(\.text).joined(separator: "\n") }
+        let names = speakerNames, order = speakerOrder
+        func speakerName(_ id: String?) -> String { id.map { Recording.displayName($0, names: names, order: order) } ?? "" }
         var lines: [String] = []
         var currentSpeaker: String?? = .none
         var buffer = ""
@@ -179,7 +239,9 @@ final class Recording {
 
     /// Testo con orari, per esportazione e lettura.
     var timedTranscript: String {
-        segments.map { seg in
+        let names = speakerNames, order = speakerOrder
+        func speakerName(_ id: String?) -> String { id.map { Recording.displayName($0, names: names, order: order) } ?? "" }
+        return segments.map { seg in
             let who = diarized && seg.speaker != nil ? "\(speakerName(seg.speaker)): " : ""
             return "[\(formatTime(seg.start))] \(who)\(seg.text)"
         }.joined(separator: "\n")
@@ -188,6 +250,8 @@ final class Recording {
     /// Versione compatta per Claude: un orario circa ogni minuto invece che a ogni frase
     /// (meno token, stessa informazione).
     var compactTranscript: String {
+        let names = speakerNames, order = speakerOrder
+        func speakerName(_ id: String?) -> String { id.map { Recording.displayName($0, names: names, order: order) } ?? "" }
         var blocks: [String] = []
         var blockStart: Double = -1000
         var current = ""

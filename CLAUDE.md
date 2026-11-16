@@ -13,6 +13,17 @@ L'utente (Pasquale) non programma: parla in italiano semplice, niente gergo tecn
 - `NOTE-VERSIONE.md` diventa il testo della Release mostrato nell'app: 1–2 frasi in italiano semplice,
   rivolte all'utente, su cosa cambia. Riscrivilo a ogni versione.
 - Tieni `COPIA-workflow-build.yml` identico a `.github/workflows/build.yml`.
+- Il workflow ha tre lavori: `build` (IPA per iPhone), `test` (prove automatiche sul simulatore) e `release`.
+  La Release parte **solo se le prove passano**. I tempi misurati compaiono come annotazioni `TEMPO …`.
+
+## Prove automatiche
+- `RegistratoreAITests`: prove di logica e velocità (registrazioni di 2–3 ore, sintesi a parti, parlanti, rete).
+- `RegistratoreAIUITests`: prove dell'interfaccia con dati finti creati da `TestSupport.swift`
+  (argomenti `-UITest -UITestSeed long|pending -UITestFakeProcessing N`). Archivio in memoria, nessun invio.
+- Per ogni bug nuovo aggiungi una prova che lo riproduce prima di correggerlo.
+- Prestazioni: non leggere `recording.segments` dentro cicli per riga senza passare dalla cache (`DecodeCache`);
+  la schermata di dettaglio non deve osservare il riproduttore (lo fanno solo `PlayerBar` e `PlaybackFollower`).
+- Background: durante la lavorazione `KeepAlive` tiene attiva la sessione audio (silenzio mescolato alle altre app).
 
 ## Diagnostica
 - L'app scrive un registro (`DiagnosticLog.swift`) e, a ogni errore o crash, invia un rapporto al repository

@@ -22,7 +22,10 @@ enum DetailTab: String, CaseIterable, Identifiable {
 struct RecordingDetailView: View {
     @Bindable var recording: Recording
     @Environment(\.modelContext) private var context
-    @StateObject private var player = AudioPlayer()
+    /// Non osservato qui: altrimenti l'intera schermata si ridisegnerebbe 4 volte al secondo
+    /// durante la riproduzione. Lo osservano solo la barra del riproduttore e PlaybackFollower.
+    @State private var player = AudioPlayer()
+    @State private var currentSegmentID: UUID?
     @Query(sort: \CustomTemplate.createdAt) private var customTemplates: [CustomTemplate]
     @Query(sort: \GlossaryEntry.createdAt) private var glossary: [GlossaryEntry]
     @Query private var voiceProfiles: [VoiceProfile]
@@ -52,11 +55,6 @@ struct RecordingDetailView: View {
         showOriginal && recording.revisedByClaude ? recording.originalSegments : recording.segments
     }
 
-    private var currentSegmentID: UUID? {
-        guard player.currentTime > 0 else { return nil }
-        return shownSegments.last(where: { $0.start <= player.currentTime + 0.2 })?.id
-    }
-
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -84,8 +82,11 @@ struct RecordingDetailView: View {
             }
             .onChange(of: currentSegmentID) { _, id in
                 guard let id, player.isPlaying, tab == .transcript else { return }
-                withAnimation(.easeInOut) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
             }
+        }
+        .background {
+            PlaybackFollower(player: player, segments: tab == .transcript ? shownSegments : [], current: $currentSegmentID)
         }
         .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
@@ -372,91 +373,44 @@ struct RecordingDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(shownSegments.enumerated()), id: \.element.id) { item in
-                    let index = item.offset
-                    let segment = item.element
-                    let isCurrent = segment.id == currentSegmentID
-                    let newTurn = recording.diarized && segment.speaker != nil
-                        && (index == 0 || shownSegments[index - 1].speaker != segment.speaker)
-                    if newTurn, let speaker = segment.speaker {
-                        Button {
-                            editingSpeaker = SpeakerEditTarget(speakerId: speaker, segmentId: segment.id)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(SpeakerColors.color(for: speaker, in: recording.speakerOrder))
-                                    .frame(width: 8, height: 8)
-                                Text(recording.speakerName(speaker))
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(SpeakerColors.color(for: speaker, in: recording.speakerOrder))
-                                Image(systemName: "pencil").font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.top, index == 0 ? 4 : 12)
-                            .padding(.bottom, 2)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Rinomina chi parla")
-                    }
-                    Button {
-                        player.seek(to: segment.start)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(formatTime(segment.start))
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(isCurrent ? Theme.accentText : .secondary)
-                                .frame(width: 44, alignment: .leading)
-                            Text(highlighted(segment))
-                                .font(.callout)
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 10)
-                        .background(isCurrent ? Theme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .id(segment.id)
-                    .contextMenu {
-                        if recording.diarized {
-                            Menu("Attribuisci a…") {
-                                ForEach(recording.speakerOrder, id: \.self) { speaker in
-                                    Button(recording.speakerName(speaker)) {
-                                        reassign(segment.id, to: speaker)
-                                    }
-                                }
-                                Button("Nuova persona") {
-                                    reassign(segment.id, to: "manual-\(UUID().uuidString.prefix(8))")
-                                }
-                            }
-                        }
-                        Button {
-                            UIPasteboard.general.string = segment.text
-                        } label: {
-                            Label("Copia la frase", systemImage: "doc.on.doc")
-                        }
-                    }
-                }
-            }
-            .padding(8)
-            .card(cornerRadius: 20)
+            transcriptList
         }
     }
 
-    /// Testo della frase con le parole incerte evidenziate.
-    private func highlighted(_ segment: TranscriptSegment) -> AttributedString {
-        var text = AttributedString(segment.text)
-        guard let doubts = segment.uncertain, !doubts.isEmpty else { return text }
-        for word in Set(doubts) {
-            var searchStart = text.startIndex
-            while let range = text[searchStart...].range(of: word) {
-                text[range].backgroundColor = Theme.highlight.opacity(0.22)
-                searchStart = range.upperBound
+    /// Elenco delle frasi. È "pigro": costruisce solo le righe visibili, e ogni riga
+    /// si ridisegna solo se cambia (così 2.000 frasi scorrono come 20).
+    private var transcriptList: some View {
+        let segments = shownSegments
+        let order = recording.speakerOrder
+        let names = recording.speakerNames
+        let diarized = recording.diarized
+        let speakers = diarized ? order.map { SpeakerChoice(id: $0, name: Recording.displayName($0, names: names, order: order)) } : []
+        let current = currentSegmentID
+        return LazyVStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(segments.enumerated()), id: \.element.id) { item in
+                let index = item.offset
+                let segment = item.element
+                let newTurn = diarized && segment.speaker != nil
+                    && (index == 0 || segments[index - 1].speaker != segment.speaker)
+                SegmentRow(
+                    index: index,
+                    segment: segment,
+                    isCurrent: segment.id == current,
+                    header: newTurn ? segment.speaker.map {
+                        SegmentRow.Header(id: $0, name: Recording.displayName($0, names: names, order: order),
+                                          color: SpeakerColors.color(for: $0, in: order))
+                    } : nil,
+                    speakers: speakers,
+                    onTap: { player.seek(to: segment.start) },
+                    onEditSpeaker: { editingSpeaker = SpeakerEditTarget(speakerId: $0, segmentId: segment.id) },
+                    onReassign: { reassign(segment.id, to: $0) }
+                )
+                .equatable()
+                .id(segment.id)
             }
         }
-        return text
+        .padding(8)
+        .card(cornerRadius: 20)
     }
 
     /// Parlanti senza nome per cui l'AI ha una proposta.
@@ -513,8 +467,9 @@ struct RecordingDetailView: View {
     private var speakerChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                let counts = Dictionary(recording.segments.compactMap(\.speaker).map { ($0, 1) }, uniquingKeysWith: +)
                 ForEach(recording.speakerOrder, id: \.self) { speaker in
-                    let count = recording.segments.filter { $0.speaker == speaker }.count
+                    let count = counts[speaker] ?? 0
                     Button {
                         editingSpeaker = SpeakerEditTarget(speakerId: speaker, segmentId: nil)
                     } label: {
@@ -578,6 +533,7 @@ struct RecordingDetailView: View {
     private var notesTab: some View {
         TextField("Scrivi qui le tue note: partecipanti, contesto, cose da ricordare…", text: $recording.notes, axis: .vertical)
             .lineLimit(8...40)
+            .accessibilityIdentifier("notes-field")
             .padding(16)
             .card(cornerRadius: 20)
     }
@@ -760,6 +716,136 @@ struct RecordingDetailView: View {
 
 // MARK: - Componenti
 
+struct SpeakerChoice: Equatable {
+    let id: String
+    let name: String
+}
+
+/// Una frase della trascrizione. Equatable: SwiftUI la ridisegna solo se cambia qualcosa.
+struct SegmentRow: View, Equatable {
+    struct Header: Equatable {
+        let id: String
+        let name: String
+        let color: Color
+    }
+
+    let index: Int
+    let segment: TranscriptSegment
+    let isCurrent: Bool
+    let header: Header?
+    let speakers: [SpeakerChoice]
+    let onTap: () -> Void
+    let onEditSpeaker: (String) -> Void
+    let onReassign: (String) -> Void
+
+    nonisolated static func == (a: SegmentRow, b: SegmentRow) -> Bool {
+        a.index == b.index && a.segment == b.segment && a.isCurrent == b.isCurrent
+            && a.header == b.header && a.speakers == b.speakers
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let header {
+                Button {
+                    onEditSpeaker(header.id)
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(header.color).frame(width: 8, height: 8)
+                        Text(header.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(header.color)
+                        Image(systemName: "pencil").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, index == 0 ? 4 : 12)
+                    .padding(.bottom, 2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Rinomina chi parla")
+            }
+            Button(action: onTap) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(formatTime(segment.start))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(isCurrent ? Theme.accentText : .secondary)
+                        .frame(width: 44, alignment: .leading)
+                    Text(Self.highlighted(segment))
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .background(isCurrent ? Theme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("segment-\(index)")
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
+            .contextMenu {
+                if !speakers.isEmpty {
+                    Menu("Attribuisci a…") {
+                        ForEach(speakers, id: \.id) { speaker in
+                            Button(speaker.name) { onReassign(speaker.id) }
+                        }
+                        Button("Nuova persona") {
+                            onReassign("manual-\(UUID().uuidString.prefix(8))")
+                        }
+                    }
+                }
+                Button {
+                    UIPasteboard.general.string = segment.text
+                } label: {
+                    Label("Copia la frase", systemImage: "doc.on.doc")
+                }
+            }
+        }
+    }
+
+    /// Testo della frase con le parole incerte evidenziate.
+    static func highlighted(_ segment: TranscriptSegment) -> AttributedString {
+        var text = AttributedString(segment.text)
+        guard let doubts = segment.uncertain, !doubts.isEmpty else { return text }
+        for word in Set(doubts) {
+            var searchStart = text.startIndex
+            while let range = text[searchStart...].range(of: word) {
+                text[range].backgroundColor = Theme.highlight.opacity(0.22)
+                searchStart = range.upperBound
+            }
+        }
+        return text
+    }
+}
+
+/// Segue la riproduzione e aggiorna la frase corrente solo quando cambia
+/// (non a ogni scatto del riproduttore). Ricerca binaria: costo trascurabile anche con ore di audio.
+struct PlaybackFollower: View {
+    @ObservedObject var player: AudioPlayer
+    let segments: [TranscriptSegment]
+    @Binding var current: UUID?
+
+    var body: some View {
+        let id = Self.segmentID(at: player.currentTime, in: segments)
+        Color.clear
+            .onChange(of: id, initial: true) { _, new in
+                if current != new { current = new }
+            }
+    }
+
+    /// Ultima frase iniziata entro `time` (+0,2 s). Le frasi sono in ordine di inizio.
+    nonisolated static func segmentID(at time: Double, in segments: [TranscriptSegment]) -> UUID? {
+        guard time > 0, !segments.isEmpty else { return nil }
+        let target = time + 0.2
+        var low = 0, high = segments.count
+        while low < high {
+            let mid = (low + high) / 2
+            if segments[mid].start <= target { low = mid + 1 } else { high = mid }
+        }
+        return low > 0 ? segments[low - 1].id : nil
+    }
+}
+
 struct CompactLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 4) {
@@ -832,6 +918,8 @@ struct SummaryCard: View {
         }
         .padding(18)
         .card(cornerRadius: 20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("summary-card")
     }
 }
 

@@ -3,7 +3,9 @@ import AVFoundation
 
 @MainActor
 final class AudioPlayer: ObservableObject {
-    @Published var isPlaying = false
+    @Published var isPlaying = false {
+        didSet { AudioActivity.playing = isPlaying }
+    }
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var error: String?
