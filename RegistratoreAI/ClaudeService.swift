@@ -195,6 +195,17 @@ enum ClaudeService {
         let result: (Data, URLResponse)
         do {
             result = try await URLSession.shared.data(for: request)
+        } catch let error as URLError where error.code == .timedOut || error.code == .networkConnectionLost {
+            // Connessione rimasta appesa (es. iOS ha sospeso l'app in background): si riprova una volta.
+            DiagnosticLog.warning(.ai, "Richiesta \(model.rawValue) senza risposta dopo \(Int(Date.now.timeIntervalSince(started))) s (\(error.code.rawValue)): riprovo")
+            try? await Task.sleep(for: .seconds(2))
+            let retryStarted = Date.now
+            do {
+                result = try await URLSession.shared.data(for: request)
+            } catch {
+                DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) anche al secondo tentativo dopo \(Int(Date.now.timeIntervalSince(retryStarted))) s, inviati \(sentBytes) byte", error)
+                throw error
+            }
         } catch {
             DiagnosticLog.error(.ai, "Richiesta \(model.rawValue) non riuscita (rete) dopo \(Int(Date.now.timeIntervalSince(started))) s, inviati \(sentBytes) byte", error)
             throw error

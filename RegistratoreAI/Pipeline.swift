@@ -27,6 +27,8 @@ final class Pipeline: ObservableObject {
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var subjects: [UUID: Recording] = [:]
     private var fractions: [UUID: Double] = [:]
+    /// Registrazioni da riprendere alla prossima apertura (es. AI non raggiungibile per la rete).
+    private var retryLater: Set<UUID> = []
 
     func isRunning(_ recording: Recording) -> Bool { tasks[recording.id] != nil }
 
@@ -93,7 +95,7 @@ final class Pipeline: ObservableObject {
                 DiagnosticLog.error(.pipeline, "\(tag) lavorazione interrotta", error)
             }
             DiagnosticLog.info(.pipeline, "\(tag) fine lavorazione (\(success ? "ok" : "con errori")) in \(Int(Date.now.timeIntervalSince(started))) s")
-            recording.pipelinePending = false
+            recording.pipelinePending = retryLater.remove(id) != nil
             try? context.save()
             status[id] = nil
             tasks[id] = nil
@@ -265,6 +267,8 @@ final class Pipeline: ObservableObject {
         do { try await revise(recording, in: context, applyNames: applyNames) } catch {
             DiagnosticLog.error(.ai, "Miglioramento fallito", error)
             errors[recording.id] = "Miglioramento AI: \(Self.readable(error))"
+            // Problema di rete: si riprova da solo alla prossima apertura dell'app.
+            if error is URLError { retryLater.insert(recording.id) }
         }
     }
 

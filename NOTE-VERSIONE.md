@@ -1,1 +1,1 @@
-La trascrizione non resta più ferma a schermo bloccato: il motore Preciso si prepara già mentre registri, così a fine registrazione parte subito. Se iOS dovesse comunque fermarla, l'app lo segnala in automatico per la correzione.
+Se il miglioramento con l'AI resta senza risposta mentre l'app è in background, ora riprova da solo; e se la rete manca, lo rifà automaticamente alla prossima apertura dell'app.
