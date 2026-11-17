@@ -14,6 +14,19 @@ struct FinishedRecording {
     let highlights: [Double]
     let inputName: String
     let startedAt: Date
+    /// Note scritte durante la registrazione, una per riga con l'orario ("[12:30] testo").
+    var notes: String = ""
+}
+
+/// Nota scritta durante la registrazione, legata al momento in cui è stata presa.
+struct TimedNote: Identifiable, Hashable {
+    let id = UUID()
+    let time: Double
+    let text: String
+
+    static func joined(_ notes: [TimedNote]) -> String {
+        notes.map { "[\(formatTime($0.time))] \($0.text)" }.joined(separator: "\n")
+    }
 }
 
 /// Registratore: AAC mono, funziona in background, sceglie il microfono e
@@ -29,6 +42,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     /// Ultimi livelli, per disegnare la forma d'onda.
     @Published var levels: [Float] = Array(repeating: 0, count: 44)
     @Published var highlights: [Double] = []
+    @Published var timedNotes: [TimedNote] = []
     @Published var inputs: [AudioInput] = []
     @Published var currentInputID: String?
     @Published var currentInputName = "Microfono iPhone"
@@ -199,6 +213,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             fileName = name
             startedAt = .now
             highlights = []
+            timedNotes = []
             elapsed = 0
             isRecording = true
             isPaused = false
@@ -234,6 +249,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
+    /// Nota veloce durante la registrazione (come "scrivi un pensiero" di Plaud): l'AI la usa come contesto.
+    func addNote(_ text: String, at time: Double) {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isRecording, !clean.isEmpty else { return }
+        timedNotes.append(TimedNote(time: time, text: clean))
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
     func stop() -> FinishedRecording? {
         guard let recorder, let fileName else { return nil }
         let duration = recorder.currentTime
@@ -254,7 +277,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         } else {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
         }
-        return FinishedRecording(fileName: fileName, duration: max(duration, elapsed), highlights: highlights, inputName: currentInputName, startedAt: startedAt)
+        return FinishedRecording(fileName: fileName, duration: max(duration, elapsed), highlights: highlights,
+                                 inputName: currentInputName, startedAt: startedAt, notes: TimedNote.joined(timedNotes))
     }
 
     /// Annulla e cancella il file.

@@ -343,7 +343,8 @@ final class Pipeline: ObservableObject {
         let started = Date.now
         if SummaryService.availabilityMessage == nil {
             do {
-                let text = try await SummaryService.summarize(transcript: transcript, template: template) { [weak self] message in
+                let text = try await SummaryService.summarize(transcript: transcript, template: template,
+                                                              userContext: recording.userContext) { [weak self] message in
                     self?.report(id, message)
                 }
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
@@ -371,7 +372,8 @@ final class Pipeline: ObservableObject {
         guard ClaudeService.isConfigured else { return }
         do {
             say(recording, "Preparo la sintesi con l'AI avanzata…")
-            let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript, template: template)
+            let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript,
+                                                          template: template, userContext: recording.userContext)
             let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
             summary.recording = recording
             context.insert(summary)

@@ -43,6 +43,12 @@ struct SummaryTemplate: Identifiable, Hashable {
     Ometti le sezioni per cui la registrazione non contiene nulla.
     """
 
+    /// Come usare note e momenti segnati dall'utente.
+    static let contextRule = """
+    CONTESTO DELL'UTENTE: usalo per capire nomi, ruoli e argomento. Dai più spazio ai punti \
+    della registrazione vicini ai momenti segnati come importanti. Non riportare le note come se fossero state dette.
+    """
+
     static let all: [SummaryTemplate] = [
         SummaryTemplate(
             id: "sintesi",
@@ -159,6 +165,18 @@ struct SummaryTemplate: Identifiable, Hashable {
             4. Cose da fare
             """,
             engine: .device
+        ),
+        SummaryTemplate(
+            id: "mappa",
+            name: "Mappa dei concetti",
+            icon: "point.3.connected.trianglepath.dotted",
+            instructions: """
+            Crea una mappa dei concetti della registrazione, da leggere a colpo d'occhio:
+            - Prima riga: il tema centrale, come titolo (#)
+            - Poi un titolo (##) per ciascun ramo principale (da 3 a 7 rami)
+            - Sotto ogni ramo, da 2 a 5 punti brevi (massimo 10 parole) con idee, fatti e collegamenti
+            - In fondo, una sezione "## Collegamenti" con i legami più importanti tra i rami (A → B: perché)
+            """
         )
     ]
 
@@ -167,14 +185,15 @@ struct SummaryTemplate: Identifiable, Hashable {
     }
 
     /// Testo pronto da incollare/inviare all'app Claude.
-    func claudePrompt(title: String, transcript: String) -> String {
-        """
+    func claudePrompt(title: String, transcript: String, userContext: String = "") -> String {
+        let context = userContext.isEmpty ? "" : "\n\(SummaryTemplate.contextRule)\n\(userContext)\n"
+        return """
         Ti incollo la trascrizione automatica di una registrazione intitolata "\(title)".
 
         \(instructions)
 
         \(SummaryTemplate.commonRules)
-
+        \(context)
         TRASCRIZIONE:
         \(transcript)
         """

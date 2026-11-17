@@ -272,6 +272,23 @@ final class Recording {
         return blocks.joined(separator: "\n")
     }
 
+    /// Contesto dato dall'utente (note scritte e momenti segnati con la bandierina):
+    /// l'AI gli dà più peso nelle elaborazioni, come le note di Plaud.
+    var userContext: String {
+        Recording.userContext(notes: notes, highlights: highlights)
+    }
+
+    static func userContext(notes: String, highlights: [Double]) -> String {
+        var parts: [String] = []
+        let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanNotes.isEmpty { parts.append("Note dell'utente:\n" + String(cleanNotes.prefix(2_000))) }
+        if !highlights.isEmpty {
+            parts.append("Momenti segnati dall'utente come importanti: "
+                         + highlights.prefix(30).map { "[\(formatTime($0))]" }.joined(separator: ", "))
+        }
+        return parts.joined(separator: "\n")
+    }
+
     /// Il titolo è ancora quello automatico ("Registrazione del …") e può essere sostituito da uno proposto.
     var hasDefaultTitle: Bool { title.hasPrefix("Registrazione del") || title.isEmpty }
 

@@ -1,1 +1,1 @@
-Se elimini una registrazione mentre è ancora in lavorazione, ora la lavorazione si ferma subito, senza mostrare errori. Migliorata anche la lavorazione con lo schermo bloccato.
+Novità: chiedi all'AI su tutto l'archivio con le fonti che portano al punto dell'audio, note durante la registrazione, cose da fare in Promemoria, velocità di ascolto, esportazione Markdown e la nuova Mappa dei concetti.

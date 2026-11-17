@@ -151,7 +151,7 @@ struct AskClaudeView: View {
         isLoading = true
         let title = recording.title
         let transcript = recording.compactTranscript
-        let notes = recording.notes
+        let notes = recording.userContext
         let history = messages
         Task {
             do {

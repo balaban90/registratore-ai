@@ -6,19 +6,25 @@ Per i elaborazioni più accurati puoi inviare il testo all'app Claude.
 
 **Requisiti:** iPhone con iOS 26 e Apple Intelligence (iPhone 15 Pro o successivi).
 
-## Cosa fa (versione 0.17.1)
+## Cosa fa (versione 0.18.0)
 
 - **Fa tutto da sola:** dopo ogni registrazione trascrive, riconosce chi parla, migliora il testo con l'AI (se attiva), crea la Sintesi veloce e dà un titolo alla registrazione. Nell'elenco vedi titolo e anteprima della sintesi; la ricerca trova argomenti, persone e parole. Le scelte manuali sono in Impostazioni > Avanzate.
 - **Lavora anche a schermo bloccato:** trascrizione ed elaborazione continuano in background (iOS mostra l'avanzamento); il motore Preciso si scarica in background con il Wi-Fi.
 - **Dynamic Island e schermata di blocco:** cronometro durante la registrazione, poi l'avanzamento della lavorazione.
 - **Widget "Registra"** (Home e schermata di blocco) e **pulsante nel Centro di Controllo:** un tocco e parte la registrazione.
+- **Chiedi all'archivio** (come Ask Plaud): una domanda su tutte le registrazioni insieme. L'AI risponde indicando le fonti; tocchi una fonte e l'audio parte da quel punto. Manda all'AI solo le parti pertinenti, per spendere poco.
+- **Note durante la registrazione:** "Aggiungi nota" salva un pensiero legato a quel momento. Note e momenti segnati con la bandierina vengono usati dall'AI in tutte le elaborazioni.
+- **Cose da fare in Promemoria:** dal menu ⋯ di un'elaborazione, "Aggiungi a Promemoria" porta le azioni da fare nell'app Promemoria di Apple.
+- **Velocità di ascolto:** 1×, 1,25×, 1,5×, 2× o 0,75×, ricordata tra una registrazione e l'altra.
+- **Esportazione Markdown** con elaborazioni, note e trascrizione, per Notion, Obsidian o l'app Note.
+- **Mappa dei concetti:** nuovo modello di elaborazione con il tema centrale, i rami principali e i collegamenti.
 - Registra in background, anche a schermo bloccato.
 - Va in pausa durante una chiamata e riprende da sola quando finisce.
 - Sceglie il microfono, mostra il livello del segnale e passa da solo a quello USB-C appena lo colleghi.
 - Segna i momenti importanti con la bandierina.
 - Importa file audio da File o da altre app.
 - Trascrive sul telefono, con gli orari: tocchi una frase e l'audio parte da lì.
-- Crea elaborazioni con 9 modelli pronti: Sintesi veloce, Riunione, Lezione o corso, Intervista, Colloquio o consulenza, Telefonata, Idee e brainstorming, Verbale formale, Appunto vocale. Puoi aggiungere i tuoi.
+- Crea elaborazioni con 10 modelli pronti: Sintesi veloce, Riunione, Lezione o corso, Intervista, Colloquio o consulenza, Telefonata, Idee e brainstorming, Verbale formale, Appunto vocale, Mappa dei concetti. Puoi aggiungere i tuoi.
 - **Due motori di trascrizione**, entrambi sul telefono: *Veloce* (Apple) e *Preciso* (Whisper Large v3 Turbo, download di circa 630 MB la prima volta). Si sceglie in Impostazioni o da ⋯ > Rifai la trascrizione.
 - Trascrive in italiano, inglese, francese, tedesco, spagnolo e portoghese (lingua da scegliere in Impostazioni).
 - Separa i parlanti sul telefono (Persona 1, Persona 2…), con nomi modificabili e profili vocali per riconoscere le persone nelle registrazioni successive.
@@ -73,5 +79,4 @@ Quando Claude modifica il codice, GitHub ricompila da solo. Scarichi il nuovo .i
 Gli audio sono in **File > Sul mio iPhone > Registratore AI > Registrazioni**.
 
 ## Prossime versioni
-- **v2:** widget e Live Activity, note e foto durante la registrazione, note e foto.
-- **v3:** ricerca in tutto l'archivio, mappa mentale, copia su iCloud Drive.
+- Foto durante la registrazione, mappa mentale grafica, copia su iCloud Drive.

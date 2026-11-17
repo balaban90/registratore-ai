@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var search = ""
     @ObservedObject private var pipeline = Pipeline.shared
     @State private var toDelete: Recording?
+    @State private var showArchiveAsk = false
     @ObservedObject private var updates = UpdateChecker.shared
 
     private var filtered: [Recording] {
@@ -149,6 +150,16 @@ struct ContentView: View {
                         Label("Impostazioni", systemImage: "gearshape")
                     }
                 }
+                if ClaudeService.isConfigured && !recordings.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showArchiveAsk = true
+                        } label: {
+                            Label("Chiedi all'archivio", systemImage: "sparkle.magnifyingglass")
+                        }
+                        .accessibilityIdentifier("archive-ask")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showImporter = true
@@ -159,6 +170,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
+            }
+            .sheet(isPresented: $showArchiveAsk) {
+                AskArchiveView(recordings: recordings)
             }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
                 Task {

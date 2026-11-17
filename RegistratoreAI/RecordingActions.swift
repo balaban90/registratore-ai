@@ -15,6 +15,7 @@ enum RecordingActions {
             highlights: finished.highlights,
             createdAt: finished.startedAt
         )
+        recording.notes = finished.notes
         context.insert(recording)
         try? context.save()
         // La registrazione si lavora da sola: l'anteprima compare nell'elenco quando è pronta.

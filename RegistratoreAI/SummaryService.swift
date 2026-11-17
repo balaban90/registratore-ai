@@ -48,24 +48,29 @@ enum SummaryService {
         }
     }
 
-    static func summarize(transcript: String, template: SummaryTemplate,
+    static func summarize(transcript: String, template: SummaryTemplate, userContext: String = "",
                           progress: @escaping @MainActor (String) -> Void) async throws -> String {
         if let message = availabilityMessage { throw SummaryFailure.unavailable(message) }
         return try await summarize(transcript: transcript, template: template, chunkChars: chunkChars,
+                                   userContext: userContext,
                                    using: { try await ask(instructions: $0, prompt: $1) }, progress: progress)
     }
 
-    static func summarize(transcript: String, template: SummaryTemplate, chunkChars: Int,
+    static func summarize(transcript: String, template: SummaryTemplate, chunkChars: Int, userContext: String = "",
                           using ask: Asker, progress: @escaping @MainActor (String) -> Void) async throws -> String {
         var material = transcript
         var isNotes = false
         var size = chunkChars
 
-        let instructions = """
+        var instructions = """
         Sei un assistente che riassume registrazioni. \(template.instructions)
 
         \(SummaryTemplate.commonRules)
         """
+        if !userContext.isEmpty {
+            // Il modello sul dispositivo legge poco: il contesto si accorcia.
+            instructions += "\n\n" + SummaryTemplate.contextRule + "\n" + String(userContext.prefix(800))
+        }
         for _ in 0..<6 {
             // Riduce il testo finché non entra in una sola richiesta.
             var round = 0

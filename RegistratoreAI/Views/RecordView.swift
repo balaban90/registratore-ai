@@ -18,6 +18,9 @@ struct RecordView: View {
     @State private var showSettings = false
     @State private var showImporter = false
     @State private var importError: String?
+    @State private var writingNote = false
+    @State private var noteText = ""
+    @State private var noteTime: Double = 0
 
     private var active: Bool { recorder.isRecording }
 
@@ -77,6 +80,16 @@ struct RecordView: View {
                     importError = error.localizedDescription
                 }
             }
+        }
+        .alert("Nota", isPresented: $writingNote) {
+            TextField("Cosa vuoi ricordare di questo momento?", text: $noteText)
+            Button("Salva") {
+                recorder.addNote(noteText, at: noteTime)
+                noteText = ""
+            }
+            Button("Annulla", role: .cancel) { noteText = "" }
+        } message: {
+            Text("La nota resta legata a questo momento (\(formatTime(noteTime))) e aiuta l'AI nelle elaborazioni.")
         }
         .alert("Importazione non riuscita", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -182,8 +195,8 @@ struct RecordView: View {
                 .accessibilityHidden(true)
 
             Group {
-                if !recorder.highlights.isEmpty {
-                    Label("\(recorder.highlights.count) \(recorder.highlights.count == 1 ? "momento segnato" : "momenti segnati")", systemImage: "flag.fill")
+                if !recorder.highlights.isEmpty || !recorder.timedNotes.isEmpty {
+                    Text(markedSummary)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color(red: 1, green: 0.70, blue: 0.25))
                 } else if let message = recorder.statusMessage {
@@ -198,6 +211,21 @@ struct RecordView: View {
             }
             .frame(height: 40)
             .padding(.top, 20)
+
+            Button {
+                noteTime = recorder.elapsed
+                writingNote = true
+            } label: {
+                Label("Aggiungi nota", systemImage: "square.and.pencil")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16)
+                    .frame(height: 38)
+                    .background(Color.white.opacity(0.1), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 6)
+            .accessibilityIdentifier("add-note")
 
             Spacer()
 
@@ -222,6 +250,15 @@ struct RecordView: View {
             .padding(.bottom, 40)
         }
         .foregroundStyle(.white)
+    }
+
+    /// "3 momenti segnati · 1 nota".
+    private var markedSummary: String {
+        var parts: [String] = []
+        let h = recorder.highlights.count, n = recorder.timedNotes.count
+        if h > 0 { parts.append("⚑ \(h) \(h == 1 ? "momento segnato" : "momenti segnati")") }
+        if n > 0 { parts.append("\(n) \(n == 1 ? "nota" : "note")") }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Pezzi comuni

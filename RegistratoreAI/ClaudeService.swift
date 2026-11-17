@@ -280,8 +280,9 @@ enum ClaudeService {
         """
     }
 
-    static func summarize(title: String, transcript: String, template: SummaryTemplate) async throws -> ClaudeReply {
-        let request = """
+    static func summarize(title: String, transcript: String, template: SummaryTemplate,
+                          userContext: String = "") async throws -> ClaudeReply {
+        var request = """
         Prepara un riassunto della registrazione seguendo queste istruzioni.
 
         \(template.instructions)
@@ -289,6 +290,10 @@ enum ClaudeService {
         \(SummaryTemplate.commonRules)
         Non citare gli orari nel riassunto, salvo che servano.
         """
+        if !userContext.isEmpty {
+            // Fuori dal blocco in cache: la trascrizione resta condivisa con le domande.
+            request += "\n\n" + SummaryTemplate.contextRule + "\n" + userContext
+        }
         let reply = try await send(
             cachedContext: context(title: title, transcript: transcript),
             messages: [ClaudeMessage(role: "user", content: request)],
@@ -302,7 +307,7 @@ enum ClaudeService {
         var trimmed = Array(history.suffix(maxChatMessages))
         while let first = trimmed.first, first.role != "user" { trimmed.removeFirst() }
         var instructions = "Rispondi in modo conciso alle domande sulla registrazione. Quando citi un passaggio indica l'orario, ad esempio [12:30]."
-        if !notes.isEmpty { instructions += "\n\nNote dell'utente sulla registrazione:\n\(notes)" }
+        if !notes.isEmpty { instructions += "\n\nContesto dato dall'utente sulla registrazione:\n\(notes)" }
         let reply = try await send(
             cachedContext: context(title: title, transcript: transcript),
             instructions: instructions,

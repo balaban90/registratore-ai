@@ -21,6 +21,8 @@ enum DetailTab: String, CaseIterable, Identifiable {
 
 struct RecordingDetailView: View {
     @Bindable var recording: Recording
+    /// Punto da cui ascoltare all'apertura (da una fonte di "Chiedi all'archivio").
+    var startAt: Double? = nil
     @Environment(\.modelContext) private var context
     /// Non osservato qui: altrimenti l'intera schermata si ridisegnerebbe 4 volte al secondo
     /// durante la riproduzione. Lo osservano solo la barra del riproduttore e PlaybackFollower.
@@ -43,6 +45,9 @@ struct RecordingDetailView: View {
     @State private var claudeReady = ClaudeService.isConfigured
     @State private var showOriginal = false
     @State private var engineChoice: EngineChoice = .automatic
+    @State private var startApplied = false
+    @State private var pendingReminders: PendingReminders?
+    @State private var notice: String?
 
     private var templates: [SummaryTemplate] {
         SummaryTemplate.available(custom: customTemplates)
@@ -107,6 +112,13 @@ struct RecordingDetailView: View {
                     .glass(cornerRadius: 20)
                     .padding(.top, 8)
                     .transition(.opacity)
+            } else if let notice {
+                Text(notice)
+                    .font(.footnote)
+                    .padding(10)
+                    .glass(cornerRadius: 20)
+                    .padding(.top, 8)
+                    .transition(.opacity)
             }
         }
         .sheet(item: $shareItem) { item in
@@ -118,9 +130,22 @@ struct RecordingDetailView: View {
         .sheet(item: $editingSpeaker) { target in
             SpeakerEditSheet(recording: recording, speakerId: target.speakerId, segmentId: target.segmentId)
         }
+        .confirmationDialog(remindersTitle, isPresented: remindersShown, titleVisibility: .visible) {
+            Button("Aggiungi") {
+                if let pending = pendingReminders { addReminders(pending.tasks) }
+            }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text(remindersList)
+        }
         .onAppear {
             claudeReady = ClaudeService.isConfigured
             player.load(url: recording.audioURL)
+            if let startAt, !startApplied {
+                startApplied = true
+                tab = .transcript
+                player.seek(to: max(0, startAt - 2), play: true)
+            }
             if !autoStarted && recording.transcript == nil && recording.transcriptionError == nil {
                 autoStarted = true
                 pipeline.process(recording, in: context)
@@ -131,6 +156,21 @@ struct RecordingDetailView: View {
             try? context.save()
         }
         .tint(Theme.accent)
+    }
+
+    // MARK: - Promemoria
+
+    private var remindersTitle: String {
+        let n = pendingReminders?.tasks.count ?? 0
+        return n == 1 ? "Aggiungere 1 cosa da fare a Promemoria?" : "Aggiungere \(n) cose da fare a Promemoria?"
+    }
+
+    private var remindersList: String {
+        (pendingReminders?.tasks ?? []).map { "• " + $0 }.joined(separator: "\n")
+    }
+
+    private var remindersShown: Binding<Bool> {
+        Binding(get: { pendingReminders != nil }, set: { if !$0 { pendingReminders = nil } })
     }
 
     // MARK: - Intestazione e avvisi
@@ -266,7 +306,8 @@ struct RecordingDetailView: View {
                                 context.delete(summary)
                                 try? context.save()
                             },
-                            onRegenerate: canRegenerate(summary) ? { regenerate(summary) } : nil)
+                            onRegenerate: canRegenerate(summary) ? { regenerate(summary) } : nil,
+                            onAddReminders: { tasks in pendingReminders = PendingReminders(tasks: tasks) })
             }
         }
     }
@@ -548,6 +589,9 @@ struct RecordingDetailView: View {
                 Button("Testo") { share(ExportService.text(title: recording.title, body: recording.timedTranscript)) }
             }
             .disabled(recording.transcript == nil)
+            Section("Tutto: elaborazioni, note e trascrizione") {
+                Button("Markdown (Notion, Obsidian, Note)") { share(ExportService.markdown(recording)) }
+            }
             Section {
                 Button("File audio") { shareItem = ShareItem(items: [recording.audioURL]) }
             }
@@ -659,12 +703,14 @@ struct RecordingDetailView: View {
 
     private func summarize(with template: SummaryTemplate, replacing old: Summary? = nil) {
         guard let transcript = recording.transcript, !isSummarizing else { return }
+        let userContext = recording.userContext
         isSummarizing = true
         errorText = nil
         progressText = "Avvio…"
         Task {
             do {
-                let text = try await SummaryService.summarize(transcript: transcript, template: template) { message in
+                let text = try await SummaryService.summarize(transcript: transcript, template: template,
+                                                              userContext: userContext) { message in
                     progressText = message
                 }
                 let summary = Summary(templateID: template.id, templateName: template.name, text: text)
@@ -686,9 +732,11 @@ struct RecordingDetailView: View {
         progressText = "L'AI sta scrivendo l'elaborazione…"
         let title = recording.title
         let transcript = recording.compactTranscript
+        let userContext = recording.userContext
         Task {
             do {
-                let reply = try await ClaudeService.summarize(title: title, transcript: transcript, template: template)
+                let reply = try await ClaudeService.summarize(title: title, transcript: transcript, template: template,
+                                                              userContext: userContext)
                 let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
                 summary.recording = recording
                 context.insert(summary)
@@ -701,9 +749,29 @@ struct RecordingDetailView: View {
         }
     }
 
+    private func addReminders(_ tasks: [String]) {
+        let title = recording.title
+        Task {
+            do {
+                let added = try await RemindersService.add(tasks, from: title)
+                flash(added == 1 ? "1 promemoria aggiunto" : "\(added) promemoria aggiunti")
+            } catch {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func flash(_ text: String) {
+        withAnimation { notice = text }
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation { notice = nil }
+        }
+    }
+
     private func sendToClaude(with template: SummaryTemplate) {
         guard let transcript = recording.transcript else { return }
-        let prompt = template.claudePrompt(title: recording.title, transcript: transcript)
+        let prompt = template.claudePrompt(title: recording.title, transcript: transcript, userContext: recording.userContext)
         UIPasteboard.general.string = prompt
         shareItem = ShareItem(items: [prompt])
         withAnimation { copiedNotice = true }
@@ -862,9 +930,11 @@ struct SummaryCard: View {
     let onShare: ([Any]) -> Void
     let onDelete: () -> Void
     var onRegenerate: (() -> Void)? = nil
+    var onAddReminders: (([String]) -> Void)? = nil
 
     var body: some View {
         let tile = Theme.tile(for: summary.templateID)
+        let tasks = RemindersService.tasks(in: summary.text)
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: Theme.icon(for: summary.templateID))
@@ -888,6 +958,12 @@ struct SummaryCard: View {
                     Button {
                         if let url = ExportService.rtf(title: "\(recordingTitle) – \(summary.templateName)", body: summary.text) { onShare([url]) }
                     } label: { Label("Word / Pages (RTF)", systemImage: "doc.text") }
+                    if let onAddReminders, !tasks.isEmpty {
+                        Divider()
+                        Button { onAddReminders(tasks) } label: {
+                            Label("Aggiungi a Promemoria (\(tasks.count))", systemImage: "checklist")
+                        }
+                    }
                     Divider()
                     Button(role: .destructive, action: onDelete) { Label("Elimina", systemImage: "trash") }
                 } label: {
@@ -969,6 +1045,19 @@ struct PlayerBar: View {
             HStack {
                 Text(formatTime(dragProgress.map { $0 * player.duration } ?? player.currentTime))
                 Spacer()
+                Button { player.nextRate() } label: {
+                    Text(AudioPlayer.label(for: player.rate))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(player.rate == 1 ? Color.secondary : Theme.accentText)
+                        .padding(.horizontal, 10)
+                        .frame(height: 24)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Velocità di riproduzione")
+                .accessibilityValue(AudioPlayer.label(for: player.rate))
+                .accessibilityIdentifier("playback-rate")
+                Spacer()
                 Text(formatTime(player.duration))
             }
             .font(.caption.monospacedDigit())
@@ -1026,4 +1115,10 @@ enum EngineChoice: String, CaseIterable, Identifiable {
         case .device: return SummaryEngine.device.label
         }
     }
+}
+
+/// Cose da fare in attesa di conferma prima di finire in Promemoria.
+struct PendingReminders: Identifiable {
+    let id = UUID()
+    let tasks: [String]
 }

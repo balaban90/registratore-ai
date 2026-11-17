@@ -13,8 +13,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.17.1"
-    CURRENT_PROJECT_VERSION: "25"
+    MARKETING_VERSION: "0.18.0"
+    CURRENT_PROJECT_VERSION: "26"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
@@ -54,6 +54,7 @@ targets:
               - registratoreai
         NSMicrophoneUsageDescription: Serve il microfono per registrare riunioni, lezioni, colloqui e appunti vocali.
         NSSpeechRecognitionUsageDescription: La trascrizione avviene sul tuo iPhone, senza inviare l'audio in rete.
+        NSRemindersFullAccessUsageDescription: Serve per aggiungere a Promemoria le cose da fare emerse dalle registrazioni.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         ITSAppUsesNonExemptEncryption: false
