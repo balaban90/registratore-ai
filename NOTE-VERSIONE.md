@@ -1,1 +1,1 @@
-Nuova schermata di apertura con il tasto grande per registrare: toccandolo si trasforma in modo fluido nella registrazione. Le registrazioni ora hanno una scheda tutta loro e il riproduttore ha lo stile vetro.
+Se elimini una registrazione mentre è ancora in lavorazione, ora la lavorazione si ferma subito, senza mostrare errori. Migliorata anche la lavorazione con lo schermo bloccato.

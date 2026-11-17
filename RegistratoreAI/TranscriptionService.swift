@@ -93,9 +93,12 @@ enum TranscriptionService {
             do {
                 return try await transcribeWithWhisper(url: url, progress: progress)
             } catch let error as TranscriptionFailure {
+                if Task.isCancelled { throw CancellationError() }
                 DiagnosticLog.error(.whisper, "Trascrizione Preciso fallita", error)
                 throw error
             } catch {
+                // Lavorazione annullata (registrazione eliminata): non si passa al motore Veloce.
+                if Task.isCancelled { throw CancellationError() }
                 DiagnosticLog.error(.whisper, "Motore Preciso non utilizzabile, passo a Veloce", error)
                 // Modello incompleto o danneggiato: lo cancella (verrà riscaricato con il Wi-Fi)
                 // e completa comunque la trascrizione con il motore Veloce.

@@ -47,8 +47,8 @@ final class BackgroundWork {
             MainActor.assumeIsolated { self?.endShortTask() }
         }
 
-        guard let bundle = Bundle.main.bundleIdentifier else { return }
-        let identifier = "\(bundle).processing.\(UUID().uuidString)"
+        guard let prefix = Self.identifierPrefix() else { return }
+        let identifier = prefix + UUID().uuidString
         let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: .main) { [weak self] bgTask in
             MainActor.assumeIsolated {
                 guard let self, let continued = bgTask as? BGContinuedProcessingTask, self.active > 0 else {
@@ -59,7 +59,7 @@ final class BackgroundWork {
             }
         }
         guard registered else {
-            DiagnosticLog.warning(.pipeline, "Lavoro in background non registrato da iOS")
+            DiagnosticLog.warning(.pipeline, "Lavoro in background non registrato da iOS · prefisso \(prefix)")
             return
         }
         let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: title, subtitle: subtitle)
@@ -69,6 +69,17 @@ final class BackgroundWork {
         } catch {
             DiagnosticLog.warning(.pipeline, "iOS ha rifiutato il lavoro in background: \(DiagnosticLog.describe(error))")
         }
+    }
+
+    /// Prefisso dei lavori in background, preso dall'elenco permesso in Info.plist
+    /// (es. "it.registratoreai.app.processing."). Chi installa l'app con Sideloadly può
+    /// cambiarne l'identificativo: costruirlo dall'identificativo attuale non combacerebbe più.
+    static func identifierPrefix(permitted: [String]? = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String],
+                                 bundle: String? = Bundle.main.bundleIdentifier) -> String? {
+        if let wildcard = permitted?.first(where: { $0.hasSuffix(".processing.*") }) {
+            return String(wildcard.dropLast())
+        }
+        return bundle.map { "\($0).processing." }
     }
 
     func update(_ text: String, fraction: Double) {

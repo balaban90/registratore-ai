@@ -21,6 +21,15 @@ enum RecordingActions {
         Pipeline.shared.process(recording, in: context)
     }
 
+    /// Elimina una registrazione; se è in lavorazione, prima la ferma.
+    @MainActor
+    static func delete(_ recording: Recording, in context: ModelContext) {
+        Pipeline.shared.cancel(recording)
+        Storage.delete(fileName: recording.audioFileName)
+        context.delete(recording)
+        try? context.save()
+    }
+
     @MainActor
     static func importAudio(_ result: Result<[URL], Error>, in context: ModelContext) async throws {
         guard let source = try result.get().first else { return }

@@ -65,6 +65,12 @@ final class LiveActivityManager {
         recordingID = nil
     }
 
+    /// Chiude subito l'attività di una registrazione eliminata durante la lavorazione.
+    func dismiss(_ id: UUID) {
+        guard recordingID == id else { return }
+        endImmediately()
+    }
+
     // MARK: -
 
     private func update(_ state: RecordingActivityAttributes.ContentState) {

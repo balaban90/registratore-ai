@@ -30,8 +30,21 @@ final class Pipeline: ObservableObject {
     private var fractions: [UUID: Double] = [:]
     /// Registrazioni da riprendere alla prossima apertura (es. AI non raggiungibile per la rete).
     private var retryLater: Set<UUID> = []
+    /// Registrazioni eliminate durante la lavorazione: si fermano senza segnalare errori.
+    private var cancelled: Set<UUID> = []
 
     func isRunning(_ recording: Recording) -> Bool { tasks[recording.id] != nil }
+    func isRunning(id: UUID) -> Bool { tasks[id] != nil }
+
+    /// Ferma la lavorazione di una registrazione che sta per essere eliminata.
+    /// Da chiamare prima di cancellarne il file e i dati.
+    func cancel(_ recording: Recording) {
+        let id = recording.id
+        guard let task = tasks[id] else { return }
+        cancelled.insert(id)
+        task.cancel()
+        DiagnosticLog.info(.pipeline, "\(id.uuidString.prefix(8)) registrazione eliminata: lavorazione annullata")
+    }
 
     // MARK: - Lavorazione completa
 
@@ -60,15 +73,19 @@ final class Pipeline: ObservableObject {
                 // (con registrazioni di ore iOS potrebbe chiudere l'app in background).
                 TranscriptionService.releaseMemory()
             }
+            try Task.checkCancellation()
             if DiarizationService.isEnabled && !recording.diarized {
                 await diarizeQuietly(recording, in: context)
             }
+            try Task.checkCancellation()
             if Self.autoImprove && ClaudeService.isConfigured && !recording.revisedByClaude {
                 await improveQuietly(recording, in: context, applyNames: true)
             }
+            try Task.checkCancellation()
             if Self.autoSummary && recording.summaries.isEmpty {
                 await summaryQuietly(recording, in: context)
             }
+            try Task.checkCancellation()
             if recording.hasDefaultTitle {
                 await titleQuietly(recording, in: context)
             }
@@ -99,7 +116,8 @@ final class Pipeline: ObservableObject {
         resumePending(all, in: context)
     }
 
-    private func run(_ recording: Recording, in context: ModelContext, _ work: @escaping () async throws -> Void) {
+    /// Avvia un lavoro sulla registrazione (interno: usato dai passaggi qui sopra e dalle prove automatiche).
+    func run(_ recording: Recording, in context: ModelContext, _ work: @escaping () async throws -> Void) {
         guard tasks[recording.id] == nil else { return }
         let id = recording.id
         errors[id] = nil
@@ -113,10 +131,25 @@ final class Pipeline: ObservableObject {
             var success = true
             do {
                 try await work()
-            } catch {
+            } catch let error where !cancelled.contains(id) {
                 success = false
                 errors[id] = Self.readable(error)
                 DiagnosticLog.error(.pipeline, "\(tag) lavorazione interrotta", error)
+            } catch {
+                // Registrazione eliminata: nessun errore da segnalare.
+            }
+            if cancelled.remove(id) != nil {
+                // La registrazione non esiste più: non si toccano i suoi dati.
+                DiagnosticLog.info(.pipeline, "\(tag) fine lavorazione (annullata) in \(Int(Date.now.timeIntervalSince(started))) s")
+                retryLater.remove(id)
+                errors[id] = nil
+                status[id] = nil
+                tasks[id] = nil
+                subjects[id] = nil
+                fractions[id] = nil
+                LiveActivityManager.shared.dismiss(id)
+                BackgroundWork.shared.end(success: true)
+                return
             }
             DiagnosticLog.info(.pipeline, "\(tag) fine lavorazione (\(success ? "ok" : "con errori")) in \(Int(Date.now.timeIntervalSince(started))) s")
             recording.pipelinePending = retryLater.remove(id) != nil
@@ -146,6 +179,7 @@ final class Pipeline: ObservableObject {
     }
 
     private func report(_ id: UUID, _ text: String) {
+        guard !cancelled.contains(id) else { return }
         if status[id] != text { DiagnosticLog.info(.pipeline, "\(id.uuidString.prefix(8)) \(text)") }
         status[id] = text
         if let f = Self.fraction(for: text) { fractions[id] = max(fractions[id] ?? 0, f) }
@@ -194,6 +228,8 @@ final class Pipeline: ObservableObject {
             let uncertain = segments.reduce(0) { $0 + ($1.uncertain?.count ?? 0) }
             DiagnosticLog.info(.transcription, "Completata in \(Int(Date.now.timeIntervalSince(started))) s · \(segments.count) frasi · \(words) parole · \(uncertain) parole incerte")
         } catch {
+            // Registrazione eliminata durante la trascrizione: non è un errore.
+            if Task.isCancelled { throw CancellationError() }
             DiagnosticLog.error(.transcription, "Fallita dopo \(Int(Date.now.timeIntervalSince(started))) s", error)
             recording.transcriptionError = Self.readable(error)
             try? context.save()

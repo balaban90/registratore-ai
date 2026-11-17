@@ -114,6 +114,39 @@ final class ServiceTests: XCTestCase {
         XCTAssertFalse(KeepAlive.shared.isRunning)
     }
 
+    func testBackgroundIdentifierUsesPermittedPrefix() {
+        // Con Sideloadly l'identificativo dell'app può cambiare: vale quello permesso in Info.plist.
+        XCTAssertEqual(BackgroundWork.identifierPrefix(permitted: ["it.registratoreai.app.processing.*"],
+                                                       bundle: "it.registratoreai.app.ABC123"),
+                       "it.registratoreai.app.processing.")
+        XCTAssertEqual(BackgroundWork.identifierPrefix(permitted: nil, bundle: "x.y"), "x.y.processing.")
+    }
+
+    /// Bug 0.17.0: eliminando una registrazione mentre era in lavorazione, la lavorazione
+    /// continuava sul file ormai cancellato e finiva con un errore (e un rapporto di diagnostica).
+    func testDeletingRecordingDuringProcessingStopsQuietly() async throws {
+        let container = try ModelContainer(for: Recording.self, Summary.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        let r = Recording(title: "x", audioFileName: "inesistente.m4a", duration: 4, inputName: "")
+        context.insert(r)
+        try context.save()
+        let id = r.id
+        let pipeline = Pipeline.shared
+        pipeline.run(r, in: context) {
+            try await Task.sleep(for: .seconds(30))
+            throw URLError(.fileDoesNotExist)
+        }
+        XCTAssertTrue(pipeline.isRunning(r))
+        RecordingActions.delete(r, in: context)
+        let deadline = Date.now.addingTimeInterval(10)
+        while pipeline.isRunning(id: id) && Date.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertFalse(pipeline.isRunning(id: id))
+        XCTAssertNil(pipeline.errors[id])
+    }
+
     func testPreviewSkipsHeadings() throws {
         let container = try ModelContainer(for: Recording.self, Summary.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))

@@ -207,9 +207,7 @@ struct ContentView: View {
     // MARK: - Azioni
 
     private func delete(_ recording: Recording) {
-        Storage.delete(fileName: recording.audioFileName)
-        context.delete(recording)
-        try? context.save()
+        RecordingActions.delete(recording, in: context)
         toDelete = nil
     }
 
