@@ -261,25 +261,32 @@ enum TranscriptionService {
         }
         segments.sort { $0.start < $1.start }
 
-        // Rete di sicurezza: se restano buchi, li riempie con il motore Veloce,
-        // così nessuna parte della registrazione va persa.
-        // Si trascrivono solo i buchi, non tutta la registrazione una seconda volta
-        // (prima con 40 minuti di audio si rifaceva tutto, raddoppiando i tempi).
-        let holes = gaps(in: segments, duration: audioDuration(url))
+        // Rete di sicurezza: cerca i tratti in cui si sente una voce ma non c'è testo
+        // (es. l'inizio, se il motore lo salta) e i silenzi lunghi, e li ritrascrive.
+        // Prima con lo stesso motore Preciso (stessa qualità), poi con il Veloce se non trova nulla.
+        // Si ritrascrivono solo quei tratti, non tutta la registrazione.
+        let duration = audioDuration(url)
+        let holes = holesToCheck(url: url, segments: segments, duration: duration)
         if !holes.isEmpty {
             await progress("Controllo che non manchi nessuna parte…")
             let gapStarted = Date.now
             var recovered: [TranscriptSegment] = []
+            var byPrecise = 0
             for hole in holes {
                 try Task.checkCancellation()
                 guard let piece = try? excerpt(of: url, from: hole.0 - 1, to: hole.1 + 1) else { continue }
                 defer { try? FileManager.default.removeItem(at: piece.url) }
-                if let apple = try? await transcribeWithApple(url: piece.url, tracksProgress: false, progress: { _ in }) {
-                    recovered += apple.map { shifted($0, by: piece.offset) }
+                var found = await whisperPiece(pipe, url: piece.url, language: options.language)
+                if found.isEmpty {
+                    found = (try? await transcribeWithApple(url: piece.url, tracksProgress: false, progress: { _ in })) ?? []
+                } else {
+                    byPrecise += 1
                 }
+                recovered += found.map { shifted($0, by: piece.offset) }
             }
-            segments = fillGaps(segments, with: recovered, duration: audioDuration(url))
-            DiagnosticLog.info(.whisper, "Buchi controllati: \(holes.count) · frasi recuperate \(recovered.count) · \(Int(Date.now.timeIntervalSince(gapStarted))) s")
+            let before = segments.count
+            segments = merge(segments, with: recovered)
+            DiagnosticLog.info(.whisper, "Tratti controllati: \(holes.count) (\(Int(holes.reduce(0) { $0 + $1.1 - $1.0 })) s) · frasi recuperate \(segments.count - before) · col Preciso \(byPrecise) · \(Int(Date.now.timeIntervalSince(gapStarted))) s")
         }
 
         guard !segments.isEmpty else { throw TranscriptionFailure.empty }
@@ -288,6 +295,157 @@ enum TranscriptionService {
 
     /// Buco minimo (in secondi) oltre il quale si prova a recuperare il parlato.
     private static let minGap = 6.0
+
+    /// Tratti da ricontrollare: silenzi lunghi del testo e tratti con voce non trascritti. Al massimo 40.
+    static func holesToCheck(url: URL, segments: [TranscriptSegment], duration: Double) -> [(Double, Double)] {
+        var holes = gaps(in: segments, duration: duration)
+        if let levels = try? energyLevels(url: url, frame: levelFrame) {
+            holes += uncoveredSpeech(levels: levels, frame: levelFrame, segments: segments)
+        }
+        return Array(mergeRanges(holes).prefix(40))
+    }
+
+    static let levelFrame = 0.25
+
+    /// Volume medio (RMS) dell'audio ogni `frame` secondi, letto a pezzi per non riempire la memoria.
+    static func energyLevels(url: URL, frame: Double) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        let perFrame = AVAudioFrameCount(max(1, format.sampleRate * frame))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: perFrame * 64) else { return [] }
+        var levels: [Float] = []
+        levels.reserveCapacity(Int(Double(file.length) / Double(perFrame)) + 1)
+        while file.framePosition < file.length {
+            try file.read(into: buffer, frameCount: perFrame * 64)
+            let n = Int(buffer.frameLength)
+            guard n > 0, let data = buffer.floatChannelData else { break }
+            let channels = Int(format.channelCount)
+            var i = 0
+            while i < n {
+                let end = min(n, i + Int(perFrame))
+                var sum: Float = 0
+                for c in 0..<channels {
+                    let ch = data[c]
+                    for k in i..<end { sum += ch[k] * ch[k] }
+                }
+                levels.append(sqrt(sum / Float(max(1, (end - i) * channels))))
+                i = end
+            }
+        }
+        return levels
+    }
+
+    /// Tratti di almeno `minSpeech` secondi in cui il volume è da voce ma nessuna frase li copre.
+    /// La soglia si adatta al rumore di fondo della registrazione.
+    static func uncoveredSpeech(levels: [Float], frame: Double, segments: [TranscriptSegment],
+                                minSpeech: Double = 1.5) -> [(Double, Double)] {
+        guard levels.count > 8 else { return [] }
+        let sorted = levels.sorted()
+        let noise = sorted[Int(Double(sorted.count - 1) * 0.15)]
+        let median = sorted[sorted.count / 2]
+        // Sopra il rumore di fondo, ma mai sopra metà del volume tipico (registrazioni con poche pause).
+        let threshold = max(min(noise * 3.2, median * 0.5), 0.004)
+        var covered = [Bool](repeating: false, count: levels.count)
+        for s in segments {
+            let a = max(0, Int((s.start - 0.4) / frame))
+            let b = min(levels.count, Int(((s.end + 0.4) / frame).rounded(.up)))
+            if a < b { for i in a..<b { covered[i] = true } }
+        }
+        var result: [(Double, Double)] = []
+        var start: Int?
+        var last = 0
+        var voiced = 0
+        func close() {
+            if let s = start, Double(voiced) * frame >= minSpeech {
+                result.append((Double(s) * frame, Double(last + 1) * frame))
+            }
+            start = nil
+            voiced = 0
+        }
+        for i in levels.indices {
+            if covered[i] {
+                if start != nil { close() }
+                continue
+            }
+            if levels[i] > threshold {
+                if start == nil { start = i }
+                last = i
+                voiced += 1
+            } else if start != nil && i - last > 3 {
+                close()   // pausa di oltre 0,75 s: il tratto finisce
+            }
+        }
+        close()
+        return result
+    }
+
+    static func mergeRanges(_ ranges: [(Double, Double)]) -> [(Double, Double)] {
+        var out: [(Double, Double)] = []
+        for r in ranges.sorted(by: { $0.0 < $1.0 }) where r.1 > r.0 {
+            if let last = out.last, r.0 <= last.1 + 1 {
+                out[out.count - 1].1 = max(last.1, r.1)
+            } else {
+                out.append(r)
+            }
+        }
+        return out
+    }
+
+    /// Trascrive un tratto breve con il motore Preciso, tenendo solo le frasi affidabili
+    /// (niente testo inventato su musica o rumore).
+    private static func whisperPiece(_ pipe: WhisperKit, url: URL, language: String?) async -> [TranscriptSegment] {
+        var o = DecodingOptions()
+        o.task = .transcribe
+        o.language = language
+        o.temperature = 0
+        o.skipSpecialTokens = true
+        o.wordTimestamps = true
+        guard let results = try? await pipe.transcribe(audioPath: url.path, decodeOptions: o) else { return [] }
+        var out: [TranscriptSegment] = []
+        for result in results {
+            for seg in result.segments where seg.noSpeechProb < 0.6 && seg.avgLogprob > -1.0 && seg.compressionRatio < 2.4 {
+                let words = (seg.words ?? []).map {
+                    TranscriptWord(text: $0.word, start: Double($0.start), end: Double($0.end),
+                                   confidence: Double($0.probability))
+                }
+                if let segment = TranscriptSegment.make(from: words) {
+                    out.append(segment)
+                } else {
+                    let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { out.append(TranscriptSegment(start: Double(seg.start), end: Double(seg.end), text: text)) }
+                }
+            }
+        }
+        return out
+    }
+
+    /// Aggiunge le frasi recuperate senza doppioni: delle frasi con gli orari delle parole si tengono
+    /// solo le parole che cadono fuori dal testo già presente; le altre entrano se stanno per lo più fuori.
+    static func merge(_ segments: [TranscriptSegment], with recovered: [TranscriptSegment]) -> [TranscriptSegment] {
+        func inside(_ t: Double) -> Bool { segments.contains { t > $0.start + 0.1 && t < $0.end - 0.1 } }
+        var extra: [TranscriptSegment] = []
+        for r in recovered {
+            if let words = r.words, !words.isEmpty {
+                let kept = words.filter { !inside(($0.start + $0.end) / 2) }
+                guard kept.count >= 1, let seg = TranscriptSegment.make(from: kept) else { continue }
+                // Una parola sola di una o due lettere è quasi sempre un residuo: si scarta.
+                if kept.count == 1 && seg.text.count < 3 { continue }
+                extra.append(seg)
+            } else {
+                let span = max(0.1, r.end - r.start)
+                let steps = 10
+                let outside = (0..<steps).filter { !inside(r.start + span * (Double($0) + 0.5) / Double(steps)) }.count
+                if Double(outside) / Double(steps) >= 0.6 { extra.append(r) }
+            }
+        }
+        // Le frasi recuperate non devono sovrapporsi tra loro (tratti contigui ritrascritti due volte).
+        var accepted: [TranscriptSegment] = []
+        for e in extra.sorted(by: { $0.start < $1.start }) {
+            if let last = accepted.last, e.start < last.end - 0.2 { continue }
+            accepted.append(e)
+        }
+        return (segments + accepted).sorted { $0.start < $1.start }
+    }
 
     private static func audioDuration(_ url: URL) -> Double {
         guard let file = try? AVAudioFile(forReading: url) else { return 0 }

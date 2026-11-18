@@ -94,6 +94,45 @@ final class FasterAutomaticTests: XCTestCase {
         XCTAssertEqual(filled.map(\.text), ["prima", "ciao", "dopo"])
     }
 
+    /// Prova del 18/11 sera: "manca un pezzo all'inizio". La voce prima della prima frase
+    /// (anche solo 3 secondi, sotto la soglia dei silenzi lunghi) va ricontrollata.
+    func testSpeechBeforeTheFirstLineIsFound() {
+        // 0–3 s voce, 3–4 s silenzio, poi voce già trascritta da 4 a 20 s.
+        var levels = [Float](repeating: 0.001, count: 80)
+        for i in 0..<12 { levels[i] = 0.05 }
+        for i in 16..<80 { levels[i] = 0.05 }
+        let existing = [TranscriptSegment(start: 4, end: 20, text: "resto")]
+        let holes = TranscriptionService.uncoveredSpeech(levels: levels, frame: 0.25, segments: existing)
+        XCTAssertEqual(holes.count, 1)
+        XCTAssertEqual(holes.first?.0 ?? -1, 0, accuracy: 0.01)
+        XCTAssertEqual(holes.first?.1 ?? -1, 3, accuracy: 0.3)
+    }
+
+    func testQuietPausesAreNotRechecked() {
+        var levels = [Float](repeating: 0.001, count: 80)
+        for i in 0..<40 { levels[i] = 0.05 }
+        levels[50] = 0.05   // un colpo isolato di 0,25 s: non è parlato
+        let existing = [TranscriptSegment(start: 0, end: 10, text: "frase")]
+        XCTAssertTrue(TranscriptionService.uncoveredSpeech(levels: levels, frame: 0.25, segments: existing).isEmpty)
+    }
+
+    func testRecoveredWordsDoNotDuplicateExistingText() {
+        let existing = [TranscriptSegment(start: 3, end: 10, text: "come stai")]
+        let words = [TranscriptWord(text: " Buongiorno", start: 0.5, end: 1.2, confidence: 0.9),
+                     TranscriptWord(text: " a", start: 1.3, end: 1.4, confidence: 0.9),
+                     TranscriptWord(text: " tutti", start: 1.5, end: 2.1, confidence: 0.9),
+                     TranscriptWord(text: " come", start: 3.2, end: 3.6, confidence: 0.9)]
+        let recovered = TranscriptSegment.make(from: words)!
+        let merged = TranscriptionService.merge(existing, with: [recovered])
+        XCTAssertEqual(merged.map(\.text), ["Buongiorno a tutti", "come stai"])
+    }
+
+    func testCloseRangesAreJoined() {
+        let merged = TranscriptionService.mergeRanges([(10, 12), (0, 3), (3.5, 5)])
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged[0].1, 5)
+    }
+
     // MARK: - Ripresa automatica
 
     func testTemporaryProblemsAreRetriedButNotMissingCredit() {
