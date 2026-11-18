@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import SwiftUI
 @testable import RegistratoreAI
 
 /// Prove della 0.19.0: mappa dei concetti disegnata, buchi della trascrizione recuperati
