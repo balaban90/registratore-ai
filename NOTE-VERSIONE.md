@@ -1,1 +1,1 @@
-Lavorazione più veloce e completamente automatica: le voci si separano anche a schermo bloccato e mentre si trascrive, il miglioramento con l'AI e i nomi delle persone non si fermano più, e la sintesi si fa sul testo migliorato. La Mappa dei concetti ora è un vero disegno, da aprire a tutto schermo e condividere come immagine.
+La barra di avanzamento ora mostra la percentuale vera, secondo per secondo. Dopo ogni aggiornamento il motore Preciso si prepara da solo appena apri l'app, così le registrazioni successive partono subito.

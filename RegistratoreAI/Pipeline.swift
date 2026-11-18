@@ -25,9 +25,25 @@ final class Pipeline: ObservableObject {
     /// Ultimo problema incontrato, per registrazione.
     @Published var errors: [UUID: String] = [:]
 
+    /// Avanzamento della lavorazione (0…1), per registrazione: si muove davvero, secondo per secondo.
+    @Published private(set) var progress: [UUID: Double] = [:]
+
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var subjects: [UUID: Recording] = [:]
     private var fractions: [UUID: Double] = [:]
+    /// Durata prevista (secondi) di ogni passaggio, per dare a ciascuno il suo peso nella barra.
+    private var plans: [UUID: [Step: Double]] = [:]
+    /// Passaggio in corso e quando è iniziato.
+    private var current: [UUID: (step: Step, began: Date)] = [:]
+    private var lastSent: [UUID: (value: Double, at: Date)] = [:]
+    private var ticker: Timer?
+
+    var isBusy: Bool { !tasks.isEmpty }
+
+    /// I passaggi della lavorazione, nell'ordine.
+    enum Step: Int, CaseIterable {
+        case preparing, transcribing, speakers, improving, summary, title
+    }
     /// Registrazioni da riprendere alla prossima apertura (es. AI non raggiungibile per la rete).
     private var retryLater: Set<UUID> = []
     /// Registrazioni eliminate durante la lavorazione: si fermano senza segnalare errori.
@@ -66,6 +82,7 @@ final class Pipeline: ObservableObject {
             }
             return
         }
+        plans[recording.id] = plan(for: recording, retranscribe: retranscribe)
         run(recording, in: context) { [self] in
             // Le voci si separano mentre si trascrive (lavorano sull'audio, non sul testo):
             // si risparmia tutto il tempo della separazione. Solo fino a 90 minuti, per la memoria.
@@ -123,11 +140,13 @@ final class Pipeline: ObservableObject {
 
     /// Solo la separazione dei parlanti (dal menu della registrazione).
     func separateSpeakers(_ recording: Recording, in context: ModelContext) {
+        plans[recording.id] = [.speakers: max(5, recording.duration * 0.015)]
         run(recording, in: context) { [self] in try await diarize(recording, in: context) }
     }
 
     /// Solo il miglioramento con l'AI (dal menu della registrazione).
     func improve(_ recording: Recording, in context: ModelContext) {
+        plans[recording.id] = [.improving: max(15, recording.duration * 0.025)]
         run(recording, in: context) { [self] in try await revise(recording, in: context, applyNames: true) }
     }
 
@@ -152,6 +171,9 @@ final class Pipeline: ObservableObject {
         errors[id] = nil
         subjects[id] = recording
         fractions[id] = 0
+        progress[id] = 0
+        if plans[id] == nil { plans[id] = [:] }
+        startTicker()
         BackgroundWork.shared.begin(title: "Registratore AI")
         let tag = id.uuidString.prefix(8)
         let started = Date.now
@@ -174,8 +196,7 @@ final class Pipeline: ObservableObject {
                 errors[id] = nil
                 status[id] = nil
                 tasks[id] = nil
-                subjects[id] = nil
-                fractions[id] = nil
+                clearProgress(id)
                 LiveActivityManager.shared.dismiss(id)
                 BackgroundWork.shared.end(success: true)
                 return
@@ -185,8 +206,7 @@ final class Pipeline: ObservableObject {
             try? context.save()
             status[id] = nil
             tasks[id] = nil
-            subjects[id] = nil
-            fractions[id] = nil
+            clearProgress(id)
             LiveActivityManager.shared.finished(recording, success: success)
             BackgroundWork.shared.end(success: success)
             WhisperModel.shared.downloadIfAppropriate()
@@ -196,27 +216,141 @@ final class Pipeline: ObservableObject {
         }
     }
 
-    /// Avanzamento indicativo per fase, mostrato nella Dynamic Island e nel sistema.
-    private static func fraction(for text: String) -> Double? {
+    // MARK: - Avanzamento
+
+    /// Durata prevista di ogni passaggio, da cui dipende quanta barra occupa.
+    /// Es. con il motore Preciso appena aggiornato la preparazione pesa molto, poi quasi nulla.
+    private func plan(for recording: Recording, retranscribe: Bool) -> [Step: Double] {
+        let d = max(recording.duration, 10)
+        let transcribing = retranscribe || recording.transcript == nil
+        let precise = TranscriptionEngine.current.resolved == .accurate
+        var plan: [Step: Double] = [:]
+        if transcribing {
+            plan[.preparing] = precise ? max(2, TranscriptionService.expectedPreparation) : 5
+            plan[.transcribing] = max(10, d * (precise ? 0.09 : 0.03))
+        }
+        if DiarizationService.isEnabled && (transcribing || !recording.diarized) {
+            // Con la trascrizione, le voci si separano insieme a lei: resta solo l'abbinamento.
+            plan[.speakers] = transcribing && d < 5_400 ? 1 : max(5, d * 0.015)
+        }
+        if Self.autoImprove && ClaudeService.isConfigured && (transcribing || !recording.revisedByClaude) {
+            plan[.improving] = max(15, d * 0.025)
+        }
+        if Self.autoSummary {
+            plan[.summary] = ClaudeService.isConfigured ? 15 : max(10, d * 0.025)
+        }
+        if recording.hasDefaultTitle { plan[.title] = 4 }
+        return plan
+    }
+
+    /// Da che passaggio viene un messaggio di stato.
+    static func step(for text: String) -> Step? {
         let t = text.lowercased()
-        if t.contains("trascriv") || t.contains("motore") || t.contains("riconoscimento") { return 0.15 }
-        if t.contains("manchi") { return 0.45 }
-        if t.contains("voci") || t.contains("chi parla") { return 0.55 }
-        if t.contains("migliora") { return 0.7 }
-        if t.contains("sintesi") || t.contains("parte") || t.contains("elaborazione") { return 0.88 }
+        // "Trascrivo…" è il primo messaggio, prima che il motore sia pronto.
+        if t == "trascrivo…" { return .preparing }
+        if t.contains("titolo") { return .title }
+        if t.contains("voci") || t.contains("chi parla") { return .speakers }
+        if t.contains("migliora") { return .improving }
+        if t.contains("sintesi") || t.contains("leggo la parte") || t.contains("scrivo l'elaborazione") { return .summary }
+        if t.contains("prepar") || t.contains("scarico il modello") { return .preparing }
+        if t.contains("trascriv") || t.contains("manchi") || t.contains("motore veloce") { return .transcribing }
         return nil
+    }
+
+    /// "parte 3 di 5" → quanto è fatto: 2/5 se la parte è in corso, 3/5 se è finita ("3 di 5 parti").
+    static func parts(in text: String) -> Double? {
+        let words = text.lowercased()
+            .replacingOccurrences(of: "(", with: " ").replacingOccurrences(of: ")", with: " ")
+            .replacingOccurrences(of: "…", with: " ")
+            .split(separator: " ")
+        guard let di = words.firstIndex(of: "di"), di > 0, di + 1 < words.count,
+              let done = Int(words[di - 1]), let total = Int(words[di + 1]), total > 0 else { return nil }
+        let finished = di + 2 < words.count && words[di + 2].hasPrefix("parti")
+        return min(1, Double(finished ? done : max(0, done - 1)) / Double(total))
+    }
+
+    /// Avanzamento nel tempo quando il passaggio non dice quanto ha fatto: segue la durata prevista
+    /// e, se ci mette di più, rallenta senza mai fermarsi né arrivare in fondo.
+    static func timeCurve(_ x: Double) -> Double {
+        guard x > 0 else { return 0 }
+        if x <= 0.8 { return x }
+        return 0.8 + 0.17 * (1 - exp(-(x - 0.8) * 2.5))
+    }
+
+    /// Calcola l'avanzamento complessivo: i passaggi già fatti, più la parte fatta di quello in corso.
+    private func overall(_ id: UUID) -> Double? {
+        guard let plan = plans[id], let now = current[id] else { return nil }
+        let step = now.step, began = now.began
+        let total = plan.values.reduce(0, +)
+        guard total > 0 else { return nil }
+        let before = Step.allCases.filter { $0.rawValue < step.rawValue }.reduce(0.0) { $0 + (plan[$1] ?? 0) }
+        let expected = plan[step] ?? 0
+        guard expected > 0 else { return before / total }
+        let elapsed = Date.now.timeIntervalSince(began)
+        var local = Self.timeCurve(elapsed / expected)
+        switch step {
+        case .transcribing:
+            // Il motore dice quanto ha trascritto: è il dato vero.
+            if let live = TranscriptionService.liveFraction, live > 0 { local = min(0.99, live) }
+        case .improving, .summary:
+            if let done = status[id].flatMap(Self.parts(in:)) { local = max(local, done) }
+        default: break
+        }
+        return min(0.99, (before + expected * local) / total)
+    }
+
+    private func push(_ id: UUID) {
+        guard tasks[id] != nil || current[id] != nil, let f = overall(id) else { return }
+        let value = max(fractions[id] ?? 0, f)
+        fractions[id] = value
+        // Le schermate si aggiornano solo quando cambia il numero intero della percentuale.
+        if progress[id].map({ Int($0 * 100) }) != Int(value * 100) { progress[id] = value }
+        let text = status[id] ?? ""
+        BackgroundWork.shared.update(text, fraction: value)
+        // La Dynamic Island si aggiorna a ogni punto percentuale o ogni 5 secondi (iOS limita gli aggiornamenti).
+        let last = lastSent[id]
+        if last == nil || value - last!.value >= 0.01 || Date.now.timeIntervalSince(last!.at) >= 5,
+           let recording = subjects[id] {
+            lastSent[id] = (value, .now)
+            LiveActivityManager.shared.processing(recording, status: text, progress: value)
+        }
+    }
+
+    private func startTicker() {
+        guard ticker == nil else { return }
+        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let shared = Pipeline.shared
+                for id in shared.tasks.keys { shared.push(id) }
+                if shared.tasks.isEmpty {
+                    shared.ticker?.invalidate()
+                    shared.ticker = nil
+                }
+            }
+        }
+    }
+
+    private func clearProgress(_ id: UUID) {
+        subjects[id] = nil
+        fractions[id] = nil
+        progress[id] = nil
+        plans[id] = nil
+        current[id] = nil
+        lastSent[id] = nil
     }
 
     private func report(_ id: UUID, _ text: String) {
         guard !cancelled.contains(id) else { return }
         if status[id] != text { DiagnosticLog.info(.pipeline, "\(id.uuidString.prefix(8)) \(text)") }
         status[id] = text
-        if let f = Self.fraction(for: text) { fractions[id] = max(fractions[id] ?? 0, f) }
-        let f = fractions[id] ?? 0
-        if let recording = subjects[id] {
-            LiveActivityManager.shared.processing(recording, status: text, progress: f)
+        if let step = Self.step(for: text), current[id]?.step != step {
+            // Mai tornare indietro: un messaggio di un passaggio precedente non sposta la barra.
+            if current[id] == nil || step.rawValue > current[id]!.step.rawValue {
+                current[id] = (step, .now)
+            }
         }
-        BackgroundWork.shared.update(text, fraction: f)
+        lastSent[id] = nil
+        push(id)
     }
 
     private func say(_ recording: Recording, _ text: String) { report(recording.id, text) }
@@ -236,6 +370,7 @@ final class Pipeline: ObservableObject {
 
     private func transcribe(_ recording: Recording, in context: ModelContext) async throws {
         let id = recording.id
+        TranscriptionService.liveFraction = nil
         say(recording, "Trascrivo…")
         let engine = TranscriptionEngine.current
         let started = Date.now
@@ -470,6 +605,7 @@ final class Pipeline: ObservableObject {
         guard SummaryService.availabilityMessage == nil else { return }
         let source = recording.sortedSummaries.first?.text ?? recording.transcript ?? ""
         guard source.count > 40 else { return }
+        say(recording, "Scelgo il titolo…")
         if let title = try? await SummaryService.title(for: source), title.count >= 3, recording.hasDefaultTitle {
             recording.title = title
             try? context.save()

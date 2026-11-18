@@ -122,6 +122,47 @@ enum TranscriptionService {
     @MainActor private static var whisper: WhisperKit?
     @MainActor private static var loading: Task<WhisperKit, Error>?
 
+    /// Avanzamento reale della trascrizione in corso (0…1), letto dal motore. nil se non si sta trascrivendo.
+    @MainActor static var liveFraction: Double?
+
+    /// La prima preparazione del motore Preciso dopo ogni installazione dura minuti: iOS adatta il modello
+    /// al chip del telefono e lo tiene da parte. Dalla seconda volta in poi bastano pochi secondi.
+    /// Qui si ricorda per quale versione dell'app la preparazione è già stata fatta.
+    static let preparedBuildKey = "whisperPreparedBuild"
+    nonisolated static var currentBuild: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?" }
+    nonisolated static var isPreparedForThisVersion: Bool {
+        UserDefaults.standard.string(forKey: preparedBuildKey) == currentBuild
+    }
+
+    /// Secondi che ci si aspetta per preparare il motore Preciso adesso (0 se è già pronto in memoria).
+    @MainActor static var expectedPreparation: TimeInterval {
+        if whisper != nil { return 0 }
+        return isPreparedForThisVersion ? 10 : 210
+    }
+
+    @MainActor static var isLoaded: Bool { whisper != nil }
+
+    /// Dopo un aggiornamento dell'app, prepara subito il motore Preciso (la parte lunga, una volta sola),
+    /// così la prima registrazione non deve aspettare. Non cambia nulla nella precisione.
+    @MainActor
+    static func prepareAfterUpdate() {
+        guard !TestSupport.isTesting, WhisperModel.isReady, TranscriptionEngine.current.resolved == .accurate,
+              !isPreparedForThisVersion, whisper == nil, loading == nil else { return }
+        Task { @MainActor in
+            let started = Date.now
+            DiagnosticLog.info(.whisper, "Preparo il motore Preciso per la nuova versione")
+            do {
+                _ = try await loadWhisper()
+                DiagnosticLog.info(.whisper, "Motore Preciso preparato dopo l'aggiornamento in \(Int(Date.now.timeIntervalSince(started))) s")
+                // Se nel frattempo non è partita una trascrizione, si libera la memoria: la prossima volta
+                // il motore si ricarica in pochi secondi.
+                if !Pipeline.shared.isBusy { releaseMemory() }
+            } catch {
+                DiagnosticLog.warning(.whisper, "Preparazione dopo l'aggiornamento non riuscita: \(DiagnosticLog.describe(error))")
+            }
+        }
+    }
+
     /// Prepara il motore Preciso mentre si registra: l'app in quel momento è attiva
     /// (anche a schermo bloccato), così a fine registrazione la trascrizione parte subito.
     @MainActor
@@ -162,12 +203,17 @@ enum TranscriptionService {
         defer { loading = nil }
         let pipe = try await task.value
         whisper = pipe
+        UserDefaults.standard.set(currentBuild, forKey: preparedBuildKey)
         return pipe
     }
 
     private static func transcribeWithWhisper(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
         let ready = await MainActor.run { whisper != nil }
-        if !ready { await progress("Preparo il motore Preciso…") }
+        if !ready {
+            let firstTime = !isPreparedForThisVersion
+            await progress(firstTime ? "Preparo il motore Preciso (dopo un aggiornamento serve qualche minuto)…"
+                                     : "Preparo il motore Preciso…")
+        }
         let started = Date.now
         let pipe = try await loadWhisper()
         if !ready { DiagnosticLog.info(.whisper, "Motore Preciso pronto in \(Int(Date.now.timeIntervalSince(started))) s") }
@@ -183,8 +229,19 @@ enum TranscriptionService {
         // Con parlato sovrapposto o audio di qualità bassa capitava di perdere pezzi di registrazione.
         options.noSpeechThreshold = nil
 
-        await progress("Trascrivo con il motore Preciso (può richiedere qualche minuto)…")
+        await progress("Trascrivo con il motore Preciso…")
+        // Avanzamento vero, letto dal motore ogni secondo.
+        await MainActor.run { liveFraction = 0 }
+        let poller = Task { @MainActor in
+            while !Task.isCancelled {
+                let f = pipe.progress.fractionCompleted
+                if f.isFinite, f > 0 { liveFraction = min(1, max(liveFraction ?? 0, f)) }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        defer { poller.cancel() }
         let results = try await pipe.transcribe(audioPath: url.path, decodeOptions: options)
+        await MainActor.run { liveFraction = 1 }
 
         var segments: [TranscriptSegment] = []
         for result in results {
@@ -217,7 +274,7 @@ enum TranscriptionService {
                 try Task.checkCancellation()
                 guard let piece = try? excerpt(of: url, from: hole.0 - 1, to: hole.1 + 1) else { continue }
                 defer { try? FileManager.default.removeItem(at: piece.url) }
-                if let apple = try? await transcribeWithApple(url: piece.url, progress: { _ in }) {
+                if let apple = try? await transcribeWithApple(url: piece.url, tracksProgress: false, progress: { _ in }) {
                     recovered += apple.map { shifted($0, by: piece.offset) }
                 }
             }
@@ -296,7 +353,8 @@ enum TranscriptionService {
 
     // MARK: - Apple (SpeechAnalyzer, iOS 26)
 
-    private static func transcribeWithApple(url: URL, progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
+    private static func transcribeWithApple(url: URL, tracksProgress: Bool = true,
+                                            progress: @escaping @MainActor (String) -> Void) async throws -> [TranscriptSegment] {
         await progress("Preparo il riconoscimento vocale…")
 
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
@@ -317,6 +375,8 @@ enum TranscriptionService {
 
         let file = try AVAudioFile(forReading: url)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let totalSeconds = max(1, Double(file.length) / file.processingFormat.sampleRate)
+        if tracksProgress { await MainActor.run { liveFraction = 0 } }
 
         let collector = Task { () throws -> [TranscriptSegment] in
             var segments: [TranscriptSegment] = []
@@ -340,6 +400,10 @@ enum TranscriptionService {
                 }
                 if let segment = TranscriptSegment.make(from: words) {
                     segments.append(segment)
+                    if tracksProgress {
+                        let done = min(1, segment.end / totalSeconds)
+                        await MainActor.run { liveFraction = max(liveFraction ?? 0, done) }
+                    }
                 } else {
                     // Nessun orario disponibile: frase intera, come prima.
                     let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)

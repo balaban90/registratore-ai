@@ -264,7 +264,15 @@ struct RecordingCard: View {
                     .lineLimit(1)
                 if let status = pipeline.status[recording.id] {
                     HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
+                        if let p = pipeline.progress[recording.id] {
+                            Text("\(Int((p * 100).rounded(.down)))%")
+                                .monospacedDigit()
+                                .fontWeight(.semibold)
+                                .contentTransition(.numericText())
+                                .animation(.default, value: Int(p * 100))
+                        } else {
+                            ProgressView().controlSize(.mini)
+                        }
                         Text(status).lineLimit(1)
                     }
                     .font(.footnote)

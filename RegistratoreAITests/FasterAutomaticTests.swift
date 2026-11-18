@@ -111,6 +111,33 @@ final class FasterAutomaticTests: XCTestCase {
         XCTAssertNil(ClaudeService.thinkingMode(for: .opus))
     }
 
+    // MARK: - Barra di avanzamento
+
+    func testStatusMessagesMapToTheRightStep() {
+        XCTAssertEqual(Pipeline.step(for: "Trascrivo…"), .preparing)
+        XCTAssertEqual(Pipeline.step(for: "Preparo il motore Preciso…"), .preparing)
+        XCTAssertEqual(Pipeline.step(for: "Trascrivo con il motore Preciso…"), .transcribing)
+        XCTAssertEqual(Pipeline.step(for: "Controllo che non manchi nessuna parte…"), .transcribing)
+        XCTAssertEqual(Pipeline.step(for: "Preparo il riconoscimento delle voci (la prima volta scarica i modelli)…"), .speakers)
+        XCTAssertEqual(Pipeline.step(for: "L'AI migliora la trascrizione (2 di 5 parti)…"), .improving)
+        XCTAssertEqual(Pipeline.step(for: "Preparo la sintesi…"), .summary)
+        XCTAssertEqual(Pipeline.step(for: "Leggo la parte 3 di 7…"), .summary)
+        XCTAssertEqual(Pipeline.step(for: "Scelgo il titolo…"), .title)
+    }
+
+    func testPartsAreReadFromTheMessage() {
+        XCTAssertEqual(Pipeline.parts(in: "L'AI migliora la trascrizione (2 di 5 parti)…") ?? -1, 0.4, accuracy: 0.001)
+        XCTAssertEqual(Pipeline.parts(in: "Leggo la parte 3 di 4…") ?? -1, 0.5, accuracy: 0.001)
+        XCTAssertNil(Pipeline.parts(in: "Preparo la sintesi…"))
+    }
+
+    func testTimeProgressNeverStopsAndNeverReachesTheEnd() {
+        XCTAssertEqual(Pipeline.timeCurve(0.5), 0.5, accuracy: 0.001)
+        XCTAssertGreaterThan(Pipeline.timeCurve(1.5), Pipeline.timeCurve(1.0))
+        XCTAssertGreaterThan(Pipeline.timeCurve(3), Pipeline.timeCurve(2))
+        XCTAssertLessThan(Pipeline.timeCurve(100), 0.98)
+    }
+
     private struct CancellationErrorLike: Error {}
     private struct TextError: LocalizedError, CustomStringConvertible {
         let text: String

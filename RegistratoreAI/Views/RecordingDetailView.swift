@@ -196,13 +196,28 @@ struct RecordingDetailView: View {
     @ViewBuilder
     private var banners: some View {
         if busy {
-            HStack(spacing: 12) {
-                ProgressView()
-                Text(pipeline.status[recording.id] ?? progressText).font(.callout)
-                Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    if pipeline.progress[recording.id] == nil { ProgressView() }
+                    Text(pipeline.status[recording.id] ?? progressText).font(.callout)
+                    Spacer()
+                    if let p = pipeline.progress[recording.id] {
+                        Text("\(Int((p * 100).rounded(.down)))%")
+                            .font(.callout.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(Theme.accentText)
+                            .contentTransition(.numericText())
+                            .animation(.default, value: Int(p * 100))
+                    }
+                }
+                if let p = pipeline.progress[recording.id] {
+                    ProgressView(value: p)
+                        .tint(Theme.accent)
+                        .animation(.linear(duration: 1), value: p)
+                }
             }
             .padding(14)
             .card(cornerRadius: 16)
+            .accessibilityElement(children: .combine)
         }
         if let errorText = errorText ?? pipeline.errors[recording.id] {
             Label(errorText, systemImage: "exclamationmark.triangle.fill")

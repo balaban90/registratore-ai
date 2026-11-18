@@ -135,12 +135,12 @@ final class BackgroundWork {
         heartbeat = nil
     }
 
-    /// Fa avanzare di poco la barra di iOS, senza mai superare la fase successiva.
+    /// Controlla che l'app non sia stata sospesa. La barra di iOS mostra solo l'avanzamento vero
+    /// (calcolato dalla lavorazione ogni secondo), senza avanzamenti finti.
     private func beat() {
         lastBeat = .now
         guard active > 0 else { return }
-        let ceiling = min(Int64(fraction * 1000) + 280, 990)
-        if shown < ceiling { shown += 1 }
+        shown = max(shown, Int64(fraction * 1000))
         task?.progress.completedUnitCount = shown
     }
 

@@ -46,6 +46,8 @@ struct RegistratoreAIApp: App {
                 DiagnosticUploader.shared.sendIfNeeded(reason: "riapertura app")
                 // Riprende da sola ciò che si era fermato (rete assente, AI sul dispositivo limitata in background…).
                 Pipeline.shared.resumePending(in: container.mainContext)
+                // Prima apertura dopo un aggiornamento: il motore Preciso si prepara subito, una volta sola.
+                TranscriptionService.prepareAfterUpdate()
                 Task { await UpdateChecker.shared.check() }
             case .background:
                 DiagnosticLog.info(.app, "App in background")
