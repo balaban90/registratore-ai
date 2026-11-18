@@ -1,5 +1,6 @@
 import Foundation
 import FluidAudio
+import CoreML
 
 struct SpeakerTurn {
     let speakerId: String
@@ -36,7 +37,11 @@ enum DiarizationService {
     }
 
     private static func makeDiarizer() async throws -> DiarizerManager {
-        let models = try await DiarizerModels.downloadIfNeeded()
+        // Niente GPU: con l'app in background (schermo bloccato) iOS la vieta e la separazione
+        // delle voci falliva. CPU e Neural Engine sono permessi anche in background.
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .cpuAndNeuralEngine
+        let models = try await DiarizerModels.downloadIfNeeded(configuration: configuration)
         let diarizer = DiarizerManager()
         diarizer.initialize(models: models)
         return diarizer

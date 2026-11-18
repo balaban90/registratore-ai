@@ -2,7 +2,7 @@ import XCTest
 import AVFoundation
 @testable import RegistratoreAI
 
-/// Prove della 0.18.1: mappa dei concetti disegnata, buchi della trascrizione recuperati
+/// Prove della 0.19.0: mappa dei concetti disegnata, buchi della trascrizione recuperati
 /// senza ritrascrivere tutto, ripresa automatica dei passaggi non riusciti.
 @MainActor
 final class FasterAutomaticTests: XCTestCase {
@@ -100,6 +100,14 @@ final class FasterAutomaticTests: XCTestCase {
         XCTAssertTrue(Pipeline.worthRetrying(CancellationErrorLike()))
         XCTAssertFalse(Pipeline.worthRetrying(TextError(text: "Your credit balance is too low")))
         XCTAssertFalse(Pipeline.worthRetrying(TextError(text: "invalid x-api-key")))
+    }
+
+    /// Rapporto del 18/11: "Risposta claude-haiku-5-5 vuota · stop max_tokens". Il ragionamento
+    /// del modello consumava tutto il limite: per correggere e riassumere va spento.
+    func testAIThinkingIsTurnedOffWhereAllowed() {
+        XCTAssertEqual(ClaudeService.thinkingMode(for: .haiku), "disabled")
+        XCTAssertEqual(ClaudeService.thinkingMode(for: .sonnet), "between_tools")
+        XCTAssertNil(ClaudeService.thinkingMode(for: .opus))
     }
 
     private struct CancellationErrorLike: Error {}

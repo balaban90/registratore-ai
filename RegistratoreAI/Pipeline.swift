@@ -67,6 +67,17 @@ final class Pipeline: ObservableObject {
             return
         }
         run(recording, in: context) { [self] in
+            // Le voci si separano mentre si trascrive (lavorano sull'audio, non sul testo):
+            // si risparmia tutto il tempo della separazione. Solo fino a 90 minuti, per la memoria.
+            var earlyTurns: Task<[SpeakerTurn], Error>?
+            defer { earlyTurns?.cancel() }
+            if (retranscribe || recording.transcript == nil) && DiarizationService.isEnabled && recording.duration < 5_400 {
+                let known = knownVoices(context)
+                let url = recording.audioURL
+                earlyTurns = Task.detached(priority: .utility) {
+                    try await DiarizationService.diarize(url: url, known: known, progress: { _ in })
+                }
+            }
             if retranscribe || recording.transcript == nil {
                 try await transcribe(recording, in: context)
                 // Il motore Preciso occupa molta memoria: lo si libera prima dei passaggi successivi
@@ -75,7 +86,12 @@ final class Pipeline: ObservableObject {
             }
             try Task.checkCancellation()
             if DiarizationService.isEnabled && !recording.diarized {
-                await diarizeQuietly(recording, in: context)
+                if let early = earlyTurns, let turns = try? await early.value, !recording.segments.isEmpty {
+                    DiagnosticLog.info(.speakers, "\(turns.count) turni · \(Set(turns.map(\.speakerId)).count) voci · separate durante la trascrizione")
+                    applySpeakers(turns, to: recording, in: context)
+                } else {
+                    await diarizeQuietly(recording, in: context)
+                }
             }
             try Task.checkCancellation()
             var improvedNow = false
@@ -254,14 +270,24 @@ final class Pipeline: ObservableObject {
         guard !recording.segments.isEmpty else { return }
         let id = recording.id
         say(recording, "Riconosco chi parla…")
-        let profiles = (try? context.fetch(FetchDescriptor<VoiceProfile>())) ?? []
-        let known = profiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
-        let profileNames = Dictionary(profiles.map { ($0.speakerKey, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let known = knownVoices(context)
         let started = Date.now
         let turns = try await DiarizationService.diarize(url: recording.audioURL, known: known) { [weak self] message in
             self?.report(id, message)
         }
         DiagnosticLog.info(.speakers, "\(turns.count) turni · \(Set(turns.map(\.speakerId)).count) voci · profili noti \(known.count) · \(Int(Date.now.timeIntervalSince(started))) s")
+        applySpeakers(turns, to: recording, in: context)
+    }
+
+    private func knownVoices(_ context: ModelContext) -> [KnownVoice] {
+        let profiles = (try? context.fetch(FetchDescriptor<VoiceProfile>())) ?? []
+        return profiles.map { KnownVoice(id: $0.speakerKey, name: $0.name, embedding: $0.embedding) }
+    }
+
+    /// Assegna a ogni frase chi parla e applica i nomi dei profili vocali salvati.
+    private func applySpeakers(_ turns: [SpeakerTurn], to recording: Recording, in context: ModelContext) {
+        let profiles = (try? context.fetch(FetchDescriptor<VoiceProfile>())) ?? []
+        let profileNames = Dictionary(profiles.map { ($0.speakerKey, $0.name) }, uniquingKeysWith: { a, _ in a })
         let entries = glossary(context)
         recording.segments = Glossary.apply(entries, to: DiarizationService.assign(turns, to: recording.segments))
         if recording.revisedByClaude {

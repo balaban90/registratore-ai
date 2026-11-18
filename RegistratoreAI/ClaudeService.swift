@@ -148,11 +148,25 @@ enum ClaudeService {
         let cache_control: CacheControl?
     }
 
+    private struct Thinking: Encodable { let type: String }
+
     private struct RequestBody: Encodable {
         let model: String
         let max_tokens: Int
         let system: [SystemBlock]
         let messages: [ClaudeMessage]
+        let thinking: Thinking?
+    }
+
+    /// I modelli attuali "ragionano" prima di rispondere, e il ragionamento consuma lo stesso limite
+    /// di lunghezza della risposta: con testi lunghi finiva tutto lì e la risposta arrivava vuota.
+    /// Per correggere e riassumere trascrizioni il ragionamento non serve: si spegne dove si può.
+    static func thinkingMode(for model: ClaudeModel) -> String? {
+        switch model {
+        case .haiku: return "disabled"
+        case .sonnet: return "between_tools"
+        case .opus: return nil
+        }
     }
 
     private struct ResponseBody: Decodable {
@@ -195,6 +209,8 @@ enum ClaudeService {
     static func send(cachedContext: String, instructions: String? = nil, messages: [ClaudeMessage],
                      maxTokens: Int, model: ClaudeModel, key: String? = nil) async throws -> ClaudeReply {
         guard let apiKey = key ?? apiKey else { throw ClaudeFailure.missingKey }
+        // Il modello più grande ragiona sempre: gli si lascia spazio perché arrivi anche la risposta.
+        let maxTokens = model == .opus ? max(maxTokens, 16_000) : maxTokens
 
         var system = [SystemBlock(text: cachedContext, cache_control: CacheControl())]
         if let instructions, !instructions.isEmpty {
@@ -208,7 +224,8 @@ enum ClaudeService {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONEncoder().encode(
-            RequestBody(model: model.rawValue, max_tokens: maxTokens, system: system, messages: messages)
+            RequestBody(model: model.rawValue, max_tokens: maxTokens, system: system, messages: messages,
+                        thinking: thinkingMode(for: model).map { Thinking(type: $0) })
         )
 
         let started = Date.now
