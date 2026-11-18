@@ -27,9 +27,7 @@ struct RecordingLiveActivity: Widget {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(context.attributes.title).font(.headline).lineLimit(1)
                         Text(state.status).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                        if state.phase == .processing, let p = state.progress {
-                            ProgressView(value: p).tint(coral)
-                        }
+                        if state.phase == .processing { ProcessingBar(state: state) }
                     }
                 }
             } compactLeading: {
@@ -71,7 +69,15 @@ struct TimeOrProgress: View {
         case .paused:
             Text(Self.format(state.pausedElapsed))
         case .processing:
-            if let p = state.progress { Text("\(Int(p * 100))%") } else { Text("…") }
+            if let window = state.progressWindow {
+                // Tempo che manca, stimato: scende da solo secondo per secondo.
+                Text(timerInterval: window, countsDown: true)
+                    .multilineTextAlignment(.trailing)
+            } else if let p = state.progress {
+                Text("\(Int(p * 100))%")
+            } else {
+                Text("…")
+            }
         case .done:
             Text("Pronta")
         }
@@ -97,15 +103,32 @@ struct LockScreenActivityView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline).foregroundStyle(.white).lineLimit(1)
                 Text(state.status).font(.subheadline).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
-                if state.phase == .processing, let p = state.progress {
-                    ProgressView(value: p).tint(coral)
-                }
+                if state.phase == .processing { ProcessingBar(state: state) }
             }
             Spacer(minLength: 4)
             TimeOrProgress(state: state)
                 .font(.title3.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: 90, alignment: .trailing)
+        }
+    }
+}
+
+/// Barra della lavorazione: con una stima di inizio e fine avanza da sola (la disegna iOS),
+/// altrimenti mostra l'ultimo valore ricevuto.
+struct ProcessingBar: View {
+    let state: RecordingActivityAttributes.ContentState
+
+    var body: some View {
+        if let window = state.progressWindow {
+            ProgressView(timerInterval: window, countsDown: false) {
+                EmptyView()
+            } currentValueLabel: {
+                EmptyView()
+            }
+            .tint(coral)
+        } else if let p = state.progress {
+            ProgressView(value: p).tint(coral)
         }
     }
 }

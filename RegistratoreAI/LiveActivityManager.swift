@@ -36,9 +36,10 @@ final class LiveActivityManager {
 
     // MARK: - Lavorazione
 
-    func processing(_ recording: Recording, status: String, progress: Double?) {
+    func processing(_ recording: Recording, status: String, progress: Double?, window: ClosedRange<Date>? = nil) {
         let state = RecordingActivityAttributes.ContentState(
-            phase: .processing, timerStart: .now, pausedElapsed: 0, status: status, progress: progress)
+            phase: .processing, timerStart: .now, pausedElapsed: 0, status: status, progress: progress,
+            progressStart: window?.lowerBound, progressEnd: window?.upperBound)
         if activity == nil || (recordingID != nil && recordingID != recording.id) {
             guard enabled, activity == nil else {
                 // Un'altra registrazione occupa già l'attività: aggiorna solo se è la stessa.

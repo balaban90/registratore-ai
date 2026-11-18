@@ -138,6 +138,22 @@ final class FasterAutomaticTests: XCTestCase {
         XCTAssertLessThan(Pipeline.timeCurve(100), 0.98)
     }
 
+    /// Schermata di blocco: la stima della fine segue la previsione all'inizio e il ritmo reale dopo,
+    /// e non è mai già scaduta.
+    func testLockScreenEstimateFollowsRealPace() {
+        XCTAssertEqual(Pipeline.estimatedTotal(elapsed: 5, progress: 0.01, planned: 300), 330, accuracy: 1)
+        // A metà dopo 100 s: circa 200 s in tutto, anche se la previsione diceva 600.
+        XCTAssertEqual(Pipeline.estimatedTotal(elapsed: 100, progress: 0.5, planned: 600), 220, accuracy: 1)
+        XCTAssertGreaterThan(Pipeline.estimatedTotal(elapsed: 400, progress: 0.2, planned: 100), 400)
+    }
+
+    func testOldLiveActivityDataStillReads() throws {
+        let json = #"{"phase":"processing","timerStart":0,"pausedElapsed":0,"status":"Trascrivo…","progress":0.3}"#
+        let state = try JSONDecoder().decode(RecordingActivityAttributes.ContentState.self, from: Data(json.utf8))
+        XCTAssertNil(state.progressWindow)
+        XCTAssertEqual(state.progress, 0.3)
+    }
+
     // MARK: - Rinomina
 
     func testTitleSuggestionsAreCleanedUp() {

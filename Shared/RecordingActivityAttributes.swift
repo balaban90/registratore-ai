@@ -17,6 +17,16 @@ struct RecordingActivityAttributes: ActivityAttributes {
         var status: String
         /// Avanzamento della lavorazione (0…1), se noto.
         var progress: Double?
+        /// Inizio e fine previsti della lavorazione: la barra e il tempo rimanente si muovono da soli
+        /// nella Dynamic Island e nella schermata di blocco, anche quando iOS non mostra subito
+        /// gli aggiornamenti mandati dall'app in background.
+        var progressStart: Date? = nil
+        var progressEnd: Date? = nil
+
+        var progressWindow: ClosedRange<Date>? {
+            guard let progressStart, let progressEnd, progressEnd > progressStart else { return nil }
+            return progressStart...progressEnd
+        }
     }
 
     /// Titolo della registrazione.

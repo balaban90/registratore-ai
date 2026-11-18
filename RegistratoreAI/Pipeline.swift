@@ -35,7 +35,8 @@ final class Pipeline: ObservableObject {
     private var plans: [UUID: [Step: Double]] = [:]
     /// Passaggio in corso e quando è iniziato.
     private var current: [UUID: (step: Step, began: Date)] = [:]
-    private var lastSent: [UUID: (value: Double, at: Date)] = [:]
+    private var lastSent: [UUID: (value: Double, at: Date, status: String)] = [:]
+    private var startedAt: [UUID: Date] = [:]
     private var ticker: Timer?
 
     var isBusy: Bool { !tasks.isEmpty }
@@ -172,6 +173,7 @@ final class Pipeline: ObservableObject {
         subjects[id] = recording
         fractions[id] = 0
         progress[id] = 0
+        startedAt[id] = .now
         if plans[id] == nil { plans[id] = [:] }
         startTicker()
         BackgroundWork.shared.begin(title: "Registratore AI")
@@ -307,13 +309,37 @@ final class Pipeline: ObservableObject {
         if progress[id].map({ Int($0 * 100) }) != Int(value * 100) { progress[id] = value }
         let text = status[id] ?? ""
         BackgroundWork.shared.update(text, fraction: value)
-        // La Dynamic Island si aggiorna a ogni punto percentuale o ogni 5 secondi (iOS limita gli aggiornamenti).
+        // Dynamic Island e schermata di blocco: la barra avanza da sola fino alla fine prevista,
+        // quindi basta correggerla di tanto in tanto (iOS rallenta gli aggiornamenti troppo frequenti,
+        // soprattutto a schermo bloccato).
         let last = lastSent[id]
-        if last == nil || value - last!.value >= 0.01 || Date.now.timeIntervalSince(last!.at) >= 5,
+        if last == nil || last!.status != text || value - last!.value >= 0.03 || Date.now.timeIntervalSince(last!.at) >= 20,
            let recording = subjects[id] {
-            lastSent[id] = (value, .now)
-            LiveActivityManager.shared.processing(recording, status: text, progress: value)
+            lastSent[id] = (value, .now, text)
+            LiveActivityManager.shared.processing(recording, status: text, progress: value, window: window(id, value))
         }
+    }
+
+    /// Inizio e fine previsti della lavorazione, coerenti con l'avanzamento attuale.
+    /// All'inizio vale la durata prevista; poi conta di più il ritmo reale.
+    private func window(_ id: UUID, _ value: Double) -> ClosedRange<Date>? {
+        guard let began = startedAt[id] else { return nil }
+        let elapsed = Date.now.timeIntervalSince(began)
+        let planned = (plans[id] ?? [:]).values.reduce(0, +)
+        guard planned > 0 || value > 0.05 else { return nil }
+        let total = Self.estimatedTotal(elapsed: elapsed, progress: value, planned: planned)
+        let remaining = max(5, total * (1 - value))
+        let span = remaining / max(0.01, 1 - value)
+        let now = Date.now
+        return now.addingTimeInterval(-value * span)...now.addingTimeInterval(remaining)
+    }
+
+    /// Durata totale stimata (secondi), con un po' di margine perché la barra non arrivi in fondo prima del tempo.
+    static func estimatedTotal(elapsed: Double, progress: Double, planned: Double) -> Double {
+        let observed = progress > 0.02 ? elapsed / progress : 0
+        let weight = min(1, max(0, (progress - 0.05) / 0.25))   // dal 5% al 30% passa dalla previsione al ritmo reale
+        let base = planned > 0 ? planned * (1 - weight) + observed * weight : observed
+        return max(base, elapsed + 5) * 1.1
     }
 
     private func startTicker() {
@@ -337,6 +363,7 @@ final class Pipeline: ObservableObject {
         plans[id] = nil
         current[id] = nil
         lastSent[id] = nil
+        startedAt[id] = nil
     }
 
     private func report(_ id: UUID, _ text: String) {
@@ -349,7 +376,6 @@ final class Pipeline: ObservableObject {
                 current[id] = (step, .now)
             }
         }
-        lastSent[id] = nil
         push(id)
     }
 
