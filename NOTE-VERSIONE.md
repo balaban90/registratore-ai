@@ -1,1 +1,1 @@
-La barra di avanzamento ora mostra la percentuale vera, secondo per secondo. Dopo ogni aggiornamento il motore Preciso si prepara da solo appena apri l'app, così le registrazioni successive partono subito.
+Ora puoi rinominare le registrazioni con i nomi proposti dall'app: tocca la matita accanto al titolo, oppure scorri o tieni premuto sulla registrazione nell'elenco.

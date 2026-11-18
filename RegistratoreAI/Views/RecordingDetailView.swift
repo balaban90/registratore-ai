@@ -48,6 +48,7 @@ struct RecordingDetailView: View {
     @State private var startApplied = false
     @State private var pendingReminders: PendingReminders?
     @State private var notice: String?
+    @State private var showRename = false
 
     private var templates: [SummaryTemplate] {
         SummaryTemplate.available(custom: customTemplates)
@@ -124,6 +125,9 @@ struct RecordingDetailView: View {
         .sheet(item: $shareItem) { item in
             ActivityView(items: item.items)
         }
+        .sheet(isPresented: $showRename) {
+            RenameSheet(recording: recording)
+        }
         .sheet(isPresented: $showAsk) {
             AskClaudeView(recording: recording)
         }
@@ -177,9 +181,22 @@ struct RecordingDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Titolo", text: $recording.title, axis: .vertical)
-                .font(.title.bold())
-                .lineLimit(1...3)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                TextField("Titolo", text: $recording.title, axis: .vertical)
+                    .font(.title.bold())
+                    .lineLimit(1...3)
+                Button {
+                    showRename = true
+                } label: {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rinomina con suggerimenti")
+                .accessibilityIdentifier("rename-button")
+            }
             HStack(spacing: 14) {
                 Label(recording.createdAt.formatted(.dateTime.day().month().hour().minute()), systemImage: "calendar")
                 Label(formatTime(recording.duration), systemImage: "clock")
@@ -617,6 +634,11 @@ struct RecordingDetailView: View {
 
     private var moreMenu: some View {
         Menu {
+            Button {
+                showRename = true
+            } label: {
+                Label("Rinomina", systemImage: "pencil")
+            }
             if recording.transcript != nil {
                 Menu {
                     ForEach(templates) { template in

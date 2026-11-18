@@ -335,6 +335,14 @@ enum ClaudeService {
         return withTruncationNotice(reply)
     }
 
+    /// Titoli alternativi con l'AI avanzata (modello economico): solo se l'AI sul dispositivo non c'è.
+    static func titleSuggestions(for text: String) async throws -> [String] {
+        let reply = try await send(cachedContext: TitleSuggestions.instructions,
+                                   messages: [ClaudeMessage(role: "user", content: String(text.prefix(6_000)))],
+                                   maxTokens: 300, model: .haiku)
+        return TitleSuggestions.parse(reply.text)
+    }
+
     private static func withTruncationNotice(_ reply: ClaudeReply) -> ClaudeReply {
         guard reply.truncated else { return reply }
         return ClaudeReply(text: reply.text + "\n\n[⚠︎ Risposta interrotta perché troppo lunga: chiedi all'AI di continuare.]",

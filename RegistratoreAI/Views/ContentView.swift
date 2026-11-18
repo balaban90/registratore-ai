@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var search = ""
     @ObservedObject private var pipeline = Pipeline.shared
     @State private var toDelete: Recording?
+    @State private var toRename: Recording?
     @State private var showArchiveAsk = false
     @ObservedObject private var updates = UpdateChecker.shared
 
@@ -116,8 +117,19 @@ struct ContentView: View {
                                 } label: {
                                     Label("Elimina", systemImage: "trash")
                                 }
+                                Button {
+                                    toRename = recording
+                                } label: {
+                                    Label("Rinomina", systemImage: "pencil")
+                                }
+                                .tint(Theme.accent)
                             }
                             .contextMenu {
+                                Button {
+                                    toRename = recording
+                                } label: {
+                                    Label("Rinomina", systemImage: "pencil")
+                                }
                                 Button(role: .destructive) {
                                     toDelete = recording
                                 } label: {
@@ -167,6 +179,9 @@ struct ContentView: View {
                         Label("Importa audio", systemImage: "square.and.arrow.down")
                     }
                 }
+            }
+            .sheet(item: $toRename) { recording in
+                RenameSheet(recording: recording)
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()

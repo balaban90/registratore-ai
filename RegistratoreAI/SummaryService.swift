@@ -116,6 +116,13 @@ enum SummaryService {
         return String(firstLine.trimmingCharacters(in: CharacterSet(charactersIn: " \"«»*#.")).prefix(80))
     }
 
+    /// Alcuni titoli alternativi (3-7 parole) da proporre quando si rinomina. Gratis, sul dispositivo.
+    static func titleSuggestions(for text: String) async throws -> [String] {
+        if let message = availabilityMessage { throw SummaryFailure.unavailable(message) }
+        let raw = try await ask(instructions: TitleSuggestions.instructions, prompt: String(text.prefix(3_000)))
+        return TitleSuggestions.parse(raw)
+    }
+
     private static func extractNotes(from chunk: String, part: Int, of total: Int, using ask: Asker) async throws -> String {
         let instructions = """
         Estrai da una parte di trascrizione gli appunti essenziali, in italiano, come elenco puntato.

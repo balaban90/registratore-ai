@@ -138,6 +138,31 @@ final class FasterAutomaticTests: XCTestCase {
         XCTAssertLessThan(Pipeline.timeCurve(100), 0.98)
     }
 
+    // MARK: - Rinomina
+
+    func testTitleSuggestionsAreCleanedUp() {
+        let raw = """
+        1. "Riunione sul turno di notte".
+        - Turni e ferie estate 2027
+        • Riunione sul turno di notte
+        **Incontro RSU**
+        ok
+        Piano ferie del reparto
+        Quinto titolo in più
+        """
+        XCTAssertEqual(TitleSuggestions.parse(raw),
+                       ["Riunione sul turno di notte", "Turni e ferie estate 2027", "Incontro RSU", "Piano ferie del reparto"])
+    }
+
+    func testBasicSuggestionsUseNamesAndDate() {
+        let recording = Recording(title: "Registrazione 18 nov, 10:06", audioFileName: "x.m4a", duration: 60, inputName: "")
+        recording.speakerNames = ["S1": "Marco", "S2": "Giulia"]
+        let basic = TitleSuggestions.basic(for: recording)
+        XCTAssertEqual(basic.first, "Incontro con Giulia, Marco")
+        XCTAssertTrue(basic.contains { $0.hasPrefix("Registrazione del ") })
+        XCTAssertEqual(Set(basic.map { $0.lowercased() }).count, basic.count)
+    }
+
     private struct CancellationErrorLike: Error {}
     private struct TextError: LocalizedError, CustomStringConvertible {
         let text: String
