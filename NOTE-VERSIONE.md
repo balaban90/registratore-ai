@@ -1,1 +1,1 @@
-Novità: chiedi all'AI su tutto l'archivio con le fonti che portano al punto dell'audio, note durante la registrazione, cose da fare in Promemoria, velocità di ascolto, esportazione Markdown e la nuova Mappa dei concetti.
+Lavorazione più veloce e più affidabile: miglioramento con l'AI, nomi delle persone e sintesi si completano da soli anche se qualcosa va storto la prima volta, e la sintesi si rifà sul testo migliorato. La Mappa dei concetti ora è un vero disegno, da aprire a tutto schermo e condividere come immagine.

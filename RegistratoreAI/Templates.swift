@@ -175,7 +175,9 @@ struct SummaryTemplate: Identifiable, Hashable {
             - Prima riga: il tema centrale, come titolo (#)
             - Poi un titolo (##) per ciascun ramo principale (da 3 a 7 rami)
             - Sotto ogni ramo, da 2 a 5 punti brevi (massimo 10 parole) con idee, fatti e collegamenti
-            - In fondo, una sezione "## Collegamenti" con i legami più importanti tra i rami (A → B: perché)
+            - In fondo, una sezione "## Collegamenti" con i legami più importanti tra i rami (A → B: perché),
+              usando per A e B gli stessi nomi dei rami
+            Rispetta esattamente questo formato (l'app lo disegna come mappa) e non aggiungere altro testo.
             """
         )
     ]

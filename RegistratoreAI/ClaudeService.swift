@@ -281,7 +281,7 @@ enum ClaudeService {
     }
 
     static func summarize(title: String, transcript: String, template: SummaryTemplate,
-                          userContext: String = "") async throws -> ClaudeReply {
+                          userContext: String = "", model: ClaudeModel? = nil) async throws -> ClaudeReply {
         var request = """
         Prepara un riassunto della registrazione seguendo queste istruzioni.
 
@@ -298,7 +298,7 @@ enum ClaudeService {
             cachedContext: context(title: title, transcript: transcript),
             messages: [ClaudeMessage(role: "user", content: request)],
             maxTokens: 4_000,
-            model: summaryModel
+            model: model ?? summaryModel
         )
         return withTruncationNotice(reply)
     }
@@ -444,15 +444,56 @@ enum ClaudeService {
             return id
         }
 
-        for (n, chunk) in chunks.enumerated() {
-            await progress("L'AI migliora la parte \(n + 1) di \(chunks.count)…")
-            let body = chunk.map { i -> String in
+        // Le parti si inviano insieme (fino a 3 alla volta): con registrazioni lunghe
+        // il miglioramento è molto più rapido che una parte dopo l'altra.
+        // Se una parte non riesce, resta com'è e le altre vengono comunque migliorate.
+        let bodies = chunks.map { chunk in
+            chunk.map { i -> String in
                 let label = segments[i].speaker.flatMap { labelFor[$0] } ?? "?"
                 return "\(i)|\(label)|\(marked(segments[i]))"
             }.joined(separator: "\n")
-            let reply = try await send(cachedContext: instructions,
-                                       messages: [ClaudeMessage(role: "user", content: body)],
-                                       maxTokens: 8_000, model: .haiku)
+        }
+        await progress(chunks.count > 1 ? "L'AI migliora la trascrizione (\(chunks.count) parti)…" : "L'AI migliora la trascrizione…")
+        var replies: [Int: ClaudeReply] = [:]
+        var firstError: Error?
+        let systemText = instructions
+        let total = chunks.count
+        await withTaskGroup(of: (Int, Result<ClaudeReply, Error>).self) { group in
+            var next = 0
+            var done = 0
+            while done < total {
+                // Al massimo 3 richieste in corso nello stesso momento.
+                while next < total && next - done < 3 && !Task.isCancelled {
+                    let n = next, body = bodies[n]
+                    next += 1
+                    group.addTask {
+                        do {
+                            let reply = try await send(cachedContext: systemText,
+                                                       messages: [ClaudeMessage(role: "user", content: body)],
+                                                       maxTokens: 8_000, model: .haiku)
+                            return (n, .success(reply))
+                        } catch {
+                            return (n, .failure(error))
+                        }
+                    }
+                }
+                guard let item = await group.next() else { break }
+                let (n, result) = item
+                done += 1
+                switch result {
+                case .success(let reply): replies[n] = reply
+                case .failure(let error):
+                    if firstError == nil { firstError = error }
+                    DiagnosticLog.warning(.ai, "Miglioramento: parte \(n + 1) di \(total) non riuscita: \(DiagnosticLog.describe(error))")
+                }
+                if total > 1 { await progress("L'AI migliora la trascrizione (\(done) di \(total) parti)…") }
+            }
+        }
+        try Task.checkCancellation()
+        if replies.isEmpty, let firstError { throw firstError }
+
+        for (n, chunk) in chunks.enumerated() {
+            guard let reply = replies[n] else { continue }
             totalCost += reply.costUSD
 
             var pieces: [Int: [(label: String, text: String)]] = [:]

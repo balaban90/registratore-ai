@@ -78,11 +78,24 @@ final class Pipeline: ObservableObject {
                 await diarizeQuietly(recording, in: context)
             }
             try Task.checkCancellation()
-            if Self.autoImprove && ClaudeService.isConfigured && !recording.revisedByClaude {
-                await improveQuietly(recording, in: context, applyNames: true)
+            var improvedNow = false
+            if Self.autoImprove && !recording.revisedByClaude {
+                if ClaudeService.isConfigured {
+                    improvedNow = await improveQuietly(recording, in: context, applyNames: true)
+                } else {
+                    DiagnosticLog.warning(.ai, "\(recording.id.uuidString.prefix(8)) miglioramento saltato: chiave AI avanzata non disponibile")
+                }
             }
             try Task.checkCancellation()
-            if Self.autoSummary && recording.summaries.isEmpty {
+            // La sintesi fatta prima del miglioramento (es. AI non raggiungibile) si rifà sul testo migliorato,
+            // con i nomi delle persone.
+            if improvedNow {
+                for old in recording.summaries where old.templateID == "sintesi" {
+                    context.delete(old)
+                }
+                try? context.save()
+            }
+            if Self.autoSummary && !recording.summaries.contains(where: { $0.templateID == "sintesi" }) {
                 await summaryQuietly(recording, in: context)
             }
             try Task.checkCancellation()
@@ -318,18 +331,49 @@ final class Pipeline: ObservableObject {
 
     private func diarizeQuietly(_ recording: Recording, in context: ModelContext) async {
         do { try await diarize(recording, in: context) } catch {
+            if Task.isCancelled { return }
             DiagnosticLog.error(.speakers, "Separazione parlanti fallita", error)
+            // Una voce sola non è un errore. Negli altri casi (es. modelli non ancora scaricati
+            // per mancanza di rete) si riprova da solo alla prossima apertura.
+            if (error as? DiarizationFailure) == .noVoices { return }
             errors[recording.id] = "Parlanti: \(Self.readable(error))"
+            retryLater.insert(recording.id)
         }
     }
 
-    private func improveQuietly(_ recording: Recording, in context: ModelContext, applyNames: Bool) async {
-        do { try await revise(recording, in: context, applyNames: applyNames) } catch {
+    /// true se il miglioramento è riuscito.
+    @discardableResult
+    private func improveQuietly(_ recording: Recording, in context: ModelContext, applyNames: Bool) async -> Bool {
+        do {
+            try await revise(recording, in: context, applyNames: applyNames)
+            return recording.revisedByClaude
+        } catch {
+            if Task.isCancelled { return false }
             DiagnosticLog.error(.ai, "Miglioramento fallito", error)
             errors[recording.id] = "Miglioramento AI: \(Self.readable(error))"
-            // Problema di rete: si riprova da solo alla prossima apertura dell'app.
-            if error is URLError { retryLater.insert(recording.id) }
+            // Si riprova da solo alla prossima apertura dell'app, salvo i problemi che non si risolvono
+            // ritentando (chiave non valida, credito esaurito): lì serve l'utente.
+            if Self.worthRetrying(error) { retryLater.insert(recording.id) }
+            return false
         }
+    }
+
+    /// Problemi passeggeri (rete, servizio occupato, app sospesa da iOS) che conviene ritentare.
+    static func worthRetrying(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if let failure = error as? ClaudeFailure {
+            switch failure {
+            case .missingKey: return false
+            case .http(let code, let message):
+                let lower = message.lowercased()
+                if lower.contains("credit") || lower.contains("balance") { return false }
+                return code != 401 && code != 403
+            case .emptyResponse: return true
+            }
+        }
+        let text = String(describing: error).lowercased()
+        let permanent = ["credit", "credito", "invalid x-api-key", "authentication", "chiave", "missingkey", "permission"]
+        return !permanent.contains { text.contains($0) }
     }
 
     /// Sintesi veloce: sul dispositivo (gratis); se non è disponibile o non riesce, con l'AI avanzata.
@@ -341,7 +385,16 @@ final class Pipeline: ObservableObject {
         guard let transcript = recording.transcript, !transcript.isEmpty else { return }
         say(recording, "Preparo la sintesi…")
         let started = Date.now
-        if SummaryService.availabilityMessage == nil {
+        // Testi lunghi: sul dispositivo vanno letti a pezzi, uno dopo l'altro (lento, e in background
+        // iOS spesso lo interrompe). Con l'AI avanzata la sintesi è pronta in pochi secondi, con il
+        // modello più economico (pochi centesimi), e tiene conto di chi parla.
+        let long = transcript.count > SummaryService.chunkChars * 2
+        let inBackgroundNow = UIApplication.shared.applicationState != .active
+        let preferCloud = ClaudeService.isConfigured && (long || inBackgroundNow)
+        if preferCloud {
+            DiagnosticLog.info(.ai, "Sintesi con l'AI avanzata · \(transcript.count) caratteri\(inBackgroundNow ? " · app in background" : "")")
+        }
+        if !preferCloud && SummaryService.availabilityMessage == nil {
             do {
                 let text = try await SummaryService.summarize(transcript: transcript, template: template,
                                                               userContext: recording.userContext) { [weak self] message in
@@ -366,14 +419,15 @@ final class Pipeline: ObservableObject {
                     return
                 }
             }
-        } else {
+        } else if !preferCloud {
             DiagnosticLog.info(.onDevice, "AI sul dispositivo non disponibile (\(SummaryService.availabilityMessage ?? "?"))")
         }
         guard ClaudeService.isConfigured else { return }
         do {
-            say(recording, "Preparo la sintesi con l'AI avanzata…")
+            say(recording, "Preparo la sintesi…")
             let reply = try await ClaudeService.summarize(title: recording.title, transcript: recording.compactTranscript,
-                                                          template: template, userContext: recording.userContext)
+                                                          template: template, userContext: recording.userContext,
+                                                          model: .haiku)
             let summary = Summary(templateID: template.id, templateName: "\(template.name) · AI", text: reply.text, costUSD: reply.costUSD)
             summary.recording = recording
             context.insert(summary)
@@ -381,7 +435,7 @@ final class Pipeline: ObservableObject {
         } catch {
             DiagnosticLog.error(.ai, "Sintesi con l'AI avanzata fallita", error)
             errors[id] = "Sintesi: \(Self.readable(error))"
-            if error is URLError { retryLater.insert(id) }
+            if Self.worthRetrying(error) { retryLater.insert(id) }
         }
     }
 

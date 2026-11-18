@@ -206,11 +206,23 @@ enum TranscriptionService {
 
         // Rete di sicurezza: se restano buchi, li riempie con il motore Veloce,
         // così nessuna parte della registrazione va persa.
-        if hasGaps(segments, duration: audioDuration(url)) {
+        // Si trascrivono solo i buchi, non tutta la registrazione una seconda volta
+        // (prima con 40 minuti di audio si rifaceva tutto, raddoppiando i tempi).
+        let holes = gaps(in: segments, duration: audioDuration(url))
+        if !holes.isEmpty {
             await progress("Controllo che non manchi nessuna parte…")
-            if let apple = try? await transcribeWithApple(url: url, progress: { _ in }) {
-                segments = fillGaps(segments, with: apple)
+            let gapStarted = Date.now
+            var recovered: [TranscriptSegment] = []
+            for hole in holes {
+                try Task.checkCancellation()
+                guard let piece = try? excerpt(of: url, from: hole.0 - 1, to: hole.1 + 1) else { continue }
+                defer { try? FileManager.default.removeItem(at: piece.url) }
+                if let apple = try? await transcribeWithApple(url: piece.url, progress: { _ in }) {
+                    recovered += apple.map { shifted($0, by: piece.offset) }
+                }
             }
+            segments = fillGaps(segments, with: recovered, duration: audioDuration(url))
+            DiagnosticLog.info(.whisper, "Buchi controllati: \(holes.count) · frasi recuperate \(recovered.count) · \(Int(Date.now.timeIntervalSince(gapStarted))) s")
         }
 
         guard !segments.isEmpty else { throw TranscriptionFailure.empty }
@@ -236,17 +248,50 @@ enum TranscriptionService {
         return result
     }
 
-    private static func hasGaps(_ segments: [TranscriptSegment], duration: Double) -> Bool {
-        !gaps(in: segments, duration: duration).isEmpty
-    }
-
     /// Inserisce le frasi del secondo motore che cadono interamente nei buchi del primo.
-    private static func fillGaps(_ segments: [TranscriptSegment], with other: [TranscriptSegment]) -> [TranscriptSegment] {
-        let holes = gaps(in: segments, duration: other.last?.end ?? 0)
+    static func fillGaps(_ segments: [TranscriptSegment], with other: [TranscriptSegment], duration: Double) -> [TranscriptSegment] {
+        let holes = gaps(in: segments, duration: max(duration, other.last?.end ?? 0))
         let extra = other.filter { seg in
             holes.contains { seg.start >= $0.0 - 0.5 && seg.end <= $0.1 + 0.5 }
         }
         return (segments + extra).sorted { $0.start < $1.start }
+    }
+
+    /// Copia un tratto dell'audio in un file temporaneo (per trascrivere solo quel pezzo).
+    static func excerpt(of url: URL, from start: Double, to end: Double) throws -> (url: URL, offset: Double) {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("tratto-\(UUID().uuidString).caf")
+        let offset: Double
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let format = file.processingFormat
+            let rate = format.sampleRate
+            let a = AVAudioFramePosition(max(0, start) * rate)
+            let b = min(file.length, AVAudioFramePosition(max(0, end) * rate))
+            guard b > a else { throw TranscriptionFailure.empty }
+            file.framePosition = a
+            offset = Double(a) / rate
+            let writer = try AVAudioFile(forWriting: out, settings: format.settings,
+                                         commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+            var remaining = AVAudioFrameCount(b - a)
+            while remaining > 0 {
+                let n = min(AVAudioFrameCount(65_536), remaining)
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: n) else { break }
+                try file.read(into: buffer, frameCount: n)
+                if buffer.frameLength == 0 { break }
+                try writer.write(from: buffer)
+                remaining -= buffer.frameLength
+            }
+        }
+        return (out, offset)
+    }
+
+    /// Sposta gli orari di una frase (trascritta da un tratto) alla posizione nella registrazione intera.
+    static func shifted(_ segment: TranscriptSegment, by offset: Double) -> TranscriptSegment {
+        var s = segment
+        s.start += offset
+        s.end += offset
+        s.words = segment.words?.map { var w = $0; w.start += offset; w.end += offset; return w }
+        return s
     }
 
     // MARK: - Apple (SpeechAnalyzer, iOS 26)

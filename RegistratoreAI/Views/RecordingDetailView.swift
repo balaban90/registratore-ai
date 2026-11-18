@@ -931,6 +931,8 @@ struct SummaryCard: View {
     let onDelete: () -> Void
     var onRegenerate: (() -> Void)? = nil
     var onAddReminders: (([String]) -> Void)? = nil
+    /// Solo per la Mappa dei concetti: mostra il testo invece del disegno.
+    @State private var showAsText = false
 
     var body: some View {
         let tile = Theme.tile(for: summary.templateID)
@@ -952,6 +954,12 @@ struct SummaryCard: View {
                 Menu {
                     Button { UIPasteboard.general.string = summary.text } label: { Label("Copia", systemImage: "doc.on.doc") }
                     Button { onShare([summary.text]) } label: { Label("Condividi testo", systemImage: "square.and.arrow.up") }
+                    if summary.templateID == "mappa" {
+                        Button { showAsText.toggle() } label: {
+                            Label(showAsText ? "Mostra la mappa" : "Mostra come testo",
+                                  systemImage: showAsText ? "point.3.connected.trianglepath.dotted" : "list.bullet")
+                        }
+                    }
                     Button {
                         if let url = ExportService.pdf(title: "\(recordingTitle) – \(summary.templateName)", body: summary.text) { onShare([url]) }
                     } label: { Label("PDF", systemImage: "doc.richtext") }
@@ -990,7 +998,11 @@ struct SummaryCard: View {
                 .padding(10)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            MarkdownText(text: summary.text)
+            if summary.templateID == "mappa", !showAsText, let map = ConceptMap.parse(summary.text) {
+                ConceptMapCard(map: map, title: recordingTitle, onShare: onShare)
+            } else {
+                MarkdownText(text: summary.text)
+            }
         }
         .padding(18)
         .card(cornerRadius: 20)
